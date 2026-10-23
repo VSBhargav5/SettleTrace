@@ -1,0 +1,3 @@
+transaction_id,payment_ref,payout_id,kind,currency,gross_minor,fee_minor,net_minor
+txn_charge_2,pay_2001,payout_002,charge,USD,4900,150,4750
+txn_charge_3,pay_2003,payout_003,charge,USD,3000,100,2900
