@@ -1,0 +1,37 @@
+name: Offline reconciliation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.11', '3.12']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Unit and fixture checks
+        run: python -m unittest discover -s tests -v
+      - name: Install distribution
+        run: python -m pip install .
+      - name: Installed command smoke test outside source directory
+        working-directory: ${{ runner.temp }}
+        run: settletrace --version
+      - name: Generate clean demonstration
+        run: settletrace reconcile --sales examples/clean/sales.csv --processor examples/clean/processor.csv --bank examples/clean/bank.csv --output output/clean
+      - name: Upload synthetic report for inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: clean-report-${{ matrix.os }}-${{ matrix.python }}
+          path: output/clean/

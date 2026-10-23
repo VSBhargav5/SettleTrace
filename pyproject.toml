@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "settletrace"
+version = "0.1.0"
+description = "Traceable offline exceptions between merchant payments, processor activity, and bank deposits"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+dependencies = []
+
+[project.scripts]
+settletrace = "settletrace.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["settletrace*"]

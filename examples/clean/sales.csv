@@ -1,0 +1,2 @@
+sale_id,payment_ref,currency,gross_minor
+sale_1001,pay_1001,USD,10000
