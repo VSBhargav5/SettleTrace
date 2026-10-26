@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 SUPPORTED_CURRENCIES = frozenset({"USD", "EUR", "GBP", "INR"})
 ENTRY_KINDS = frozenset({"charge", "refund", "dispute", "adjustment", "fee"})
+MAX_MINOR_ABS = 10**128
 
 
 class InputError(ValueError):
@@ -19,6 +20,12 @@ def _identifier(name: str, value: str, *, allow_empty: bool = False) -> None:
 def _integer(name: str, value: int) -> None:
     if not isinstance(value, int) or isinstance(value, bool):
         raise InputError(f"{name} must be an integer minor-unit amount")
+
+
+def _amount(name: str, value: int) -> None:
+    _integer(name, value)
+    if abs(value) >= MAX_MINOR_ABS:
+        raise InputError(f"{name} exceeds the supported 128-digit minor-unit limit")
 
 
 def _currency_and_row(currency: str, row: int) -> None:
@@ -43,7 +50,7 @@ class Sale:
         _identifier("sale_id", self.sale_id)
         _identifier("payment_ref", self.payment_ref)
         _currency_and_row(self.currency, self.row)
-        _integer("gross_minor", self.gross_minor)
+        _amount("gross_minor", self.gross_minor)
         if self.gross_minor <= 0:
             raise InputError("sale gross_minor must be positive")
 
@@ -68,7 +75,7 @@ class Entry:
         _identifier("payout_id", self.payout_id, allow_empty=True)
         _currency_and_row(self.currency, self.row)
         for name in ("gross_minor", "fee_minor", "net_minor"):
-            _integer(name, getattr(self, name))
+            _amount(name, getattr(self, name))
         if self.kind == "charge" and self.gross_minor <= 0:
             raise InputError("charge gross_minor must be positive")
         if self.kind in {"refund", "dispute"} and self.gross_minor >= 0:
@@ -91,4 +98,4 @@ class Deposit:
         _identifier("bank_ref", self.bank_ref)
         _identifier("payout_id", self.payout_id)
         _currency_and_row(self.currency, self.row)
-        _integer("amount_minor", self.amount_minor)
+        _amount("amount_minor", self.amount_minor)

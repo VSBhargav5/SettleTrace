@@ -39,6 +39,8 @@ integer arithmetic, never a float or a rounding rule. `19.99` becomes `1999`.
 Exponents, grouping separators, whitespace, mixed separators, and excess
 precision are rejected. Choose `--decimal-separator ,` explicitly for quoted
 comma-decimal cells; the CSV column delimiter remains a comma.
+Individual converted amounts support at most 128 minor-unit digits, including
+the sign-independent magnitude. Larger amounts are input errors, not values to round.
 
 Only `charge`, `refund`, and debit `dispute` reporting categories are supported.
 Charges require positive gross; refunds and disputes require negative gross.

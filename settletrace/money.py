@@ -2,7 +2,7 @@
 
 import re
 
-from .models import InputError, SUPPORTED_CURRENCIES
+from .models import InputError, MAX_MINOR_ABS, SUPPORTED_CURRENCIES
 
 
 _AMOUNT = re.compile(r"([+-]?)([0-9]+)(?:\.([0-9]{1,2}))?\Z")
@@ -24,4 +24,6 @@ def to_minor(value: str, currency: str, *, decimal_separator: str = ".") -> int:
         amount = int(whole) * 100 + int((fraction or "").ljust(2, "0"))
     except ValueError as exc:
         raise InputError("Amount is too large to parse") from exc
+    if amount >= MAX_MINOR_ABS:
+        raise InputError("Amount exceeds the supported 128-digit minor-unit limit")
     return -amount if sign == "-" else amount

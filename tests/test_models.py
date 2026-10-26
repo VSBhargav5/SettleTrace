@@ -5,6 +5,14 @@ from settletrace.models import Deposit, Entry, InputError, Sale
 
 
 class ModelTests(unittest.TestCase):
+    def test_amount_digit_bound_applies_to_every_input_record(self):
+        for constructor in (lambda: Sale("s", "p", "USD", 10**128),
+                            lambda: Entry("e", "p", "po", "charge", "USD", 10**128, 0, 10**128),
+                            lambda: Deposit("b", "po", "USD", -(10**128))):
+            with self.assertRaisesRegex(InputError, "128-digit"):
+                constructor()
+        self.assertEqual(Deposit("b", "po", "USD", 10**128 - 1).amount_minor, 10**128 - 1)
+
     def test_records_are_frozen(self):
         sale = Sale("sale-1", "pay-1", "USD", 100)
         with self.assertRaises(FrozenInstanceError):

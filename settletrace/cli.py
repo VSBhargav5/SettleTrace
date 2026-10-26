@@ -45,7 +45,10 @@ def _fingerprint(path: Path, data: bytes) -> dict:
 
 
 def _json(value: dict) -> str:
-    return json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False, allow_nan=False) + "\n"
+    try:
+        return json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False, allow_nan=False) + "\n"
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise InputError(f"Output cannot be serialized: {exc}") from exc
 
 
 def _input_arguments(command: argparse.ArgumentParser) -> None:

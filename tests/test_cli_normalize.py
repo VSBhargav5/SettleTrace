@@ -61,3 +61,8 @@ class NormalizeCliTests(unittest.TestCase):
         self.source.write_text(self.source.read_text().replace(",refund,", ",fee,"))
         self.assertEqual(self.invoke(), 2)
         self.assertFalse((self.root / "normalized").exists())
+
+    def test_unserializable_sized_amount_is_a_clean_input_error_without_output(self):
+        self.source.write_text(self.source.read_text().replace("100.00", "9" * 4300))
+        self.assertEqual(self.invoke(), 2)
+        self.assertFalse((self.root / "normalized").exists())

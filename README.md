@@ -91,6 +91,8 @@ bank_ref,payout_id,currency,amount_minor
   exponents, grouped numbers, or whitespace padding. Only USD, EUR, GBP, and INR
   are supported; each has two decimal places in this version. Currencies are
   never converted or added together.
+- Individual amounts are limited to 128 minor-unit digits so accepted values
+  remain portable through JSON/CSV serialization; no rounding is introduced.
 - A sale is one captured payment, not an entire order with split captures.
   `sale_id` and `payment_ref` must each be unique in the sales file.
 - Processor `transaction_id` is unique. `kind` is `charge`, `refund`, `dispute`,

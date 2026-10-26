@@ -5,6 +5,12 @@ from settletrace.money import to_minor
 
 
 class MoneyTests(unittest.TestCase):
+    def test_amounts_that_could_overflow_json_digit_conversion_are_rejected(self):
+        with self.assertRaises(InputError):
+            to_minor("9" * 4300, "USD")
+        with self.assertRaisesRegex(InputError, "128-digit"):
+            to_minor("9" * 127 + ".99", "USD")
+
     def test_decimal_units_are_exact_for_all_supported_currencies(self):
         for currency in ("USD", "EUR", "GBP", "INR"):
             for text, expected in (("19.99", 1999), ("0.01", 1), ("10", 1000),
