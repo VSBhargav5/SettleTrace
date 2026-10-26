@@ -49,6 +49,7 @@ def reconcile(sales: list[Sale], entries: list[Entry], deposits: list[Deposit]) 
     findings = []
     matched_sales = 0
     matched_payouts = 0
+    payouts = []
 
     def finding(code: str, severity: str, reference: str, message: str, evidence: list[dict],
                 details: dict | None = None) -> None:
@@ -119,6 +120,25 @@ def reconcile(sales: list[Sale], entries: list[Entry], deposits: list[Deposit]) 
         currencies = {entry.currency for entry in payout_entries}
         currency_error = len(currencies) > 1 or (
             bool(currencies) and deposit is not None and deposit.currency not in currencies)
+        net_by_currency = {currency: sum(entry.net_minor for entry in payout_entries if entry.currency == currency)
+                           for currency in sorted(currencies)}
+        delta = (deposit.amount_minor - net_by_currency[deposit.currency]
+                 if deposit is not None and len(currencies) == 1 and not currency_error else None)
+        if len(currencies) > 1:
+            status = "mixed_currency"
+        elif not payout_entries:
+            status = "processor_not_observed"
+        elif deposit is None:
+            status = "bank_not_observed"
+        elif currency_error:
+            status = "currency_mismatch"
+        else:
+            status = "matched" if delta == 0 else "amount_mismatch"
+        payouts.append({"payout_id": payout_id, "processor_net_by_currency": net_by_currency,
+                        "bank": ({"currency": deposit.currency, "amount_minor": deposit.amount_minor,
+                                  "evidence": _evidence("bank", deposit)} if deposit is not None else None),
+                        "entry_count": len(payout_entries), "status": status, "delta_minor": delta,
+                        "evidence": sorted(evidence, key=_evidence_key)})
         if currency_error:
             finding("PAYOUT_CURRENCY_MISMATCH", "error", payout_id,
                     "Payout records contain different currencies; payout amounts were not combined or compared.", evidence)
@@ -156,5 +176,6 @@ def reconcile(sales: list[Sale], entries: list[Entry], deposits: list[Deposit]) 
                     "findings": len(findings), "matched_sales": matched_sales, "matched_payouts": matched_payouts,
                     "reconciled": not findings},
         "totals_by_currency": totals,
+        "payouts": payouts,
         "findings": findings,
     }

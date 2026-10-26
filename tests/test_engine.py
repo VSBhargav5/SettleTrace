@@ -7,6 +7,37 @@ from settletrace.models import Deposit, Entry, InputError, Sale
 
 
 class EngineTests(unittest.TestCase):
+    def test_payout_ledger_includes_balanced_rows_and_signed_delta(self):
+        result = reconcile([], [Entry("e", "", "po", "adjustment", "USD", 100, 3, 97, 7)],
+                           [Deposit("b", "po", "USD", 98, 9)])
+        payout = result["payouts"][0]
+        self.assertEqual(payout["payout_id"], "po")
+        self.assertEqual(payout["processor_net_by_currency"], {"USD": 97})
+        self.assertEqual(payout["delta_minor"], 1)
+        self.assertEqual(payout["status"], "amount_mismatch")
+        self.assertEqual(payout["entry_count"], 1)
+        self.assertEqual(payout["evidence"], [{"source": "bank", "row": 9, "id": "b"},
+                                               {"source": "processor", "row": 7, "id": "e"}])
+
+    def test_payout_ledger_does_not_sum_mixed_currencies_or_invent_comparisons(self):
+        result = reconcile([], [Entry("a", "", "mixed", "adjustment", "USD", 100, 0, 100),
+                                Entry("b", "", "mixed", "adjustment", "EUR", 100, 0, 100),
+                                Entry("c", "", "missing", "adjustment", "GBP", 10, 0, 10)],
+                           [Deposit("bank", "bank-only", "INR", 100)])
+        payouts = {p["payout_id"]: p for p in result["payouts"]}
+        self.assertEqual(payouts["mixed"]["processor_net_by_currency"], {"EUR": 100, "USD": 100})
+        self.assertEqual(payouts["mixed"]["status"], "mixed_currency")
+        self.assertEqual(payouts["missing"]["status"], "bank_not_observed")
+        self.assertEqual(payouts["bank-only"]["status"], "processor_not_observed")
+        self.assertTrue(all(p["delta_minor"] is None for p in payouts.values()))
+
+    def test_zero_net_payout_remains_an_observed_match(self):
+        result = reconcile([], [Entry("a", "", "po", "adjustment", "USD", 100, 0, 100),
+                                Entry("b", "", "po", "adjustment", "USD", -100, 0, -100)],
+                           [Deposit("b", "po", "USD", 0)])
+        self.assertEqual(result["payouts"][0]["status"], "matched")
+        self.assertEqual(result["payouts"][0]["delta_minor"], 0)
+
     def assert_codes(self, result, *expected):
         self.assertEqual([finding["code"] for finding in result["findings"]], sorted(expected))
 
