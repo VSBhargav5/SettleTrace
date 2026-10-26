@@ -60,7 +60,9 @@ class VerifyTests(unittest.TestCase):
 
     def test_deeply_nested_json_is_a_clean_input_error(self):
         (self.bundle / "manifest.json").write_bytes(b'{"nested":' + b"[" * 2000 + b"]" * 2000 + b"}")
-        with self.assertRaisesRegex(InputError, "invalid JSON"):
+        # Parser nesting limits differ by Python version. Rejection may occur
+        # during parsing or manifest validation; both must be clean input errors.
+        with self.assertRaises(InputError):
             verify_bundle(self.bundle)
 
     def test_untrusted_output_paths_are_never_followed(self):
