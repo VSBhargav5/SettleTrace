@@ -47,6 +47,16 @@ class NormalizeCliTests(unittest.TestCase):
         self.assertEqual(self.invoke("stripe.csv"), 2)
         self.assertEqual(self.source.read_bytes(), before)
 
+    def test_audit_tracks_physical_ending_lines_when_exported_identifiers_are_multiline(self):
+        self.source.write_text(self.source.read_text().replace("txn1,ch1", '"txn\n1",ch1'))
+        self.assertEqual(self.invoke(), 0)
+        output = self.root / "normalized"
+        entries = parse_entries((output / "processor.csv").read_bytes(), "processor.csv")
+        audit = json.loads((output / "audit.json").read_text())
+        self.assertEqual([row["canonical_row"] for row in audit["rows"]], [entry.row for entry in entries])
+        self.assertEqual([entry.row for entry in entries], [3, 4])
+        self.assertEqual([row["source_row"] for row in audit["rows"]], [4, 6])
+
     def test_unsupported_activity_never_produces_a_partial_success(self):
         self.source.write_text(self.source.read_text().replace(",refund,", ",fee,"))
         self.assertEqual(self.invoke(), 2)

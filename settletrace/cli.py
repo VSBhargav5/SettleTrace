@@ -109,13 +109,15 @@ def _normalize(args: argparse.Namespace) -> None:
     writer.writeheader()
     for entry in entries:
         writer.writerow({field: getattr(entry, field) for field in ENTRY_FIELDS})
+    canonical = stream.getvalue()
+    canonical_entries = parse_entries(canonical.encode("utf-8"), "processor.csv")
     audit = {"schema_version": "1", "tool_version": __version__,
              "input": _fingerprint(args.input, data),
              "configuration": {"processor_format": "stripe-payout-itemized-7", "decimal_separator": args.decimal_separator,
                                "max_input_bytes": args.max_input_bytes},
-             "rows": [{"transaction_id": entry.transaction_id, "canonical_row": index + 2, "source_row": entry.row}
-                      for index, entry in enumerate(entries)]}
-    _write_pack(args.output, {"processor.csv": stream.getvalue()}, audit, "audit.json")
+             "rows": [{"transaction_id": entry.transaction_id, "canonical_row": normalized.row, "source_row": entry.row}
+                      for entry, normalized in zip(entries, canonical_entries)]}
+    _write_pack(args.output, {"processor.csv": canonical}, audit, "audit.json")
 
 
 def main(argv: list[str] | None = None) -> int:
