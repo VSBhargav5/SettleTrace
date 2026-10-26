@@ -22,6 +22,30 @@ def _json(value: dict) -> str:
     return json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False, allow_nan=False) + "\n"
 
 
+def _input_arguments(command: argparse.ArgumentParser) -> None:
+    command.add_argument("--sales", type=Path, required=True)
+    command.add_argument("--processor", type=Path, required=True)
+    command.add_argument("--bank", type=Path, required=True)
+    command.add_argument("--processor-format", choices=("canonical", "stripe-payout-itemized-7"), default="canonical")
+    command.add_argument("--decimal-separator", choices=(".", ","), default=".")
+
+
+def _read_inputs(args: argparse.Namespace) -> tuple:
+    paths = {"sales": args.sales, "processor": args.processor, "bank": args.bank}
+    # Each immutable snapshot supplies both the hash and the parsed records.
+    snapshots = {name: path.read_bytes() for name, path in paths.items()}
+    fingerprints = {name: _fingerprint(path, snapshots[name]) for name, path in paths.items()}
+    sales = parse_sales(snapshots["sales"], str(args.sales))
+    if args.processor_format == "canonical":
+        if args.decimal_separator != ".":
+            raise InputError("--decimal-separator applies only to the Stripe format")
+        entries = parse_entries(snapshots["processor"], str(args.processor))
+    else:
+        entries = parse_stripe(snapshots["processor"], str(args.processor), decimal_separator=args.decimal_separator)
+    deposits = parse_deposits(snapshots["bank"], str(args.bank))
+    return sales, entries, deposits, fingerprints
+
+
 def _bundle(result: dict, inputs: dict, output: Path, configuration: dict | None = None) -> None:
     manifest = {"schema_version": "1", "tool_version": __version__, "inputs": inputs,
                 "configuration": configuration or {"processor_format": "canonical", "decimal_separator": "."}}
@@ -49,29 +73,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", action="version", version=__version__)
     commands = parser.add_subparsers(dest="command", required=True)
     command = commands.add_parser("reconcile", help="Compare canonical sales, processor, and bank CSVs")
-    command.add_argument("--sales", type=Path, required=True)
-    command.add_argument("--processor", type=Path, required=True)
-    command.add_argument("--bank", type=Path, required=True)
+    _input_arguments(command)
     command.add_argument("--output", type=Path, required=True, help="New output directory; existing paths are never overwritten")
-    command.add_argument("--processor-format", choices=("canonical", "stripe-payout-itemized-7"), default="canonical")
-    command.add_argument("--decimal-separator", choices=(".", ","), default=".")
+    validate = commands.add_parser("validate", help="Validate input contracts without writing a report")
+    _input_arguments(validate)
     args = parser.parse_args(argv)
     try:
-        if args.output.exists():
+        if args.command == "reconcile" and args.output.exists():
             raise InputError(f"Output path already exists: {args.output}; choose a new directory")
-        paths = {"sales": args.sales, "processor": args.processor, "bank": args.bank}
-        # Each immutable snapshot supplies both the hash and the parsed records.
-        snapshots = {name: path.read_bytes() for name, path in paths.items()}
-        fingerprints = {name: _fingerprint(path, snapshots[name]) for name, path in paths.items()}
-        sales = parse_sales(snapshots["sales"], str(args.sales))
-        if args.processor_format == "canonical":
-            if args.decimal_separator != ".":
-                raise InputError("--decimal-separator applies only to the Stripe format")
-            entries = parse_entries(snapshots["processor"], str(args.processor))
-        else:
-            entries = parse_stripe(snapshots["processor"], str(args.processor), decimal_separator=args.decimal_separator)
-        deposits = parse_deposits(snapshots["bank"], str(args.bank))
+        sales, entries, deposits, fingerprints = _read_inputs(args)
         result = reconcile(sales, entries, deposits)
+        if args.command == "validate":
+            print(_json({"schema_version": "1", "valid": True,
+                         "records": {"sales": len(sales), "processor": len(entries), "bank": len(deposits)},
+                         "observed_findings": result["summary"]["findings"],
+                         "note": "Input contracts are valid; any reconciliation findings still need investigation."}), end="")
+            return 0
         _bundle(result, fingerprints, args.output, {"processor_format": args.processor_format,
                                                   "decimal_separator": args.decimal_separator})
     except (InputError, OSError) as exc:
