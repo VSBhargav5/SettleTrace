@@ -30,7 +30,7 @@ class FormatCliTests(unittest.TestCase):
     def test_raw_mode_preserves_source_hash_and_conversion_configuration(self):
         self.assertEqual(self.invoke("--processor-format", "stripe-payout-itemized-7"), 0)
         manifest = json.loads((self.root / "report/manifest.json").read_text())
-        self.assertEqual(manifest["configuration"], {"processor_format": "stripe-payout-itemized-7", "decimal_separator": "."})
+        self.assertEqual(manifest["configuration"], {"processor_format": "stripe-payout-itemized-7", "decimal_separator": ".", "fail_on": "any"})
         self.assertEqual(manifest["inputs"]["processor"]["sha256"], hashlib.sha256(self.processor.read_bytes()).hexdigest())
         result = json.loads((self.root / "report/report.json").read_text())
         self.assertEqual(result["totals_by_currency"]["USD"]["net_minor"], 9700)

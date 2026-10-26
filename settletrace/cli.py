@@ -98,6 +98,8 @@ def main(argv: list[str] | None = None) -> int:
     command = commands.add_parser("reconcile", help="Compare canonical sales, processor, and bank CSVs")
     _input_arguments(command)
     command.add_argument("--output", type=Path, required=True, help="New output directory; existing paths are never overwritten")
+    command.add_argument("--fail-on", choices=("any", "error"), default="any",
+                         help="Exit 1 for any finding (default), or only error-severity findings")
     validate = commands.add_parser("validate", help="Validate input contracts without writing a report")
     _input_arguments(validate)
     normalize = commands.add_parser("normalize-stripe", help="Export canonical activity and raw-row mapping from a Stripe itemized.7 CSV")
@@ -121,7 +123,7 @@ def main(argv: list[str] | None = None) -> int:
                          "note": "Input contracts are valid; any reconciliation findings still need investigation."}), end="")
             return 0
         _bundle(result, fingerprints, args.output, {"processor_format": args.processor_format,
-                                                  "decimal_separator": args.decimal_separator})
+                                                  "decimal_separator": args.decimal_separator, "fail_on": args.fail_on})
     except (InputError, OSError) as exc:
         print(f"SettleTrace input/output error: {exc}", file=sys.stderr)
         return 2
@@ -129,4 +131,6 @@ def main(argv: list[str] | None = None) -> int:
     state = "no exceptions observed" if summary["reconciled"] else "needs review"
     print(f"SettleTrace: {state}; {summary['findings']} finding(s).")
     print(f"Report: {args.output / 'report.html'}")
-    return 0 if summary["reconciled"] else 1
+    print(f"Exit policy: {args.fail_on}; all findings remain in the report.")
+    failed = bool(result["findings"]) if args.fail_on == "any" else any(f["severity"] == "error" for f in result["findings"])
+    return 1 if failed else 0

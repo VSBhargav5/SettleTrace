@@ -88,7 +88,8 @@ def render_html(result: dict, manifest: dict) -> str:
     configuration = manifest.get("configuration", {})
     contract = ("<h2>Import contract</h2><p class='note'>Processor format: <code>"
                 + esc(configuration["processor_format"]) + "</code> · decimal separator: <code>"
-                + esc(configuration["decimal_separator"]) + "</code></p>") if configuration else ""
+                + esc(configuration["decimal_separator"]) + "</code> · exit policy: <code>"
+                + esc(configuration.get("fail_on", "any")) + "</code></p>") if configuration else ""
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
