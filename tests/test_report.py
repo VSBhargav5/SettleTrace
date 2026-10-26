@@ -54,3 +54,19 @@ class ReportTests(unittest.TestCase):
         result = report()
         result["findings"] = []
         self.assertEqual(list(csv.DictReader(io.StringIO(findings_csv(result)))), [])
+
+    def test_payout_ledger_shows_matching_and_missing_evidence(self):
+        from settletrace.engine import reconcile
+        from settletrace.models import Deposit, Entry
+        result = reconcile([], [Entry("txn<script>", "", "po&1", "adjustment", "USD", 970, 0, 970, 2)],
+                           [Deposit("b1", "po&1", "USD", 970, 2), Deposit("b2", "po2", "EUR", 100, 3)])
+        manifest = {"inputs": {source: {"name": "export.csv", "sha256": "abc"}
+                               for source in ("sales", "processor", "bank")}}
+        content = render_html(result, manifest)
+        self.assertIn("Payout ledger", content)
+        self.assertIn("processor not observed", content)
+        self.assertIn("USD 0.00", content)
+        self.assertIn("Not compared", content)
+        self.assertIn("po&amp;1", content)
+        self.assertIn("txn&lt;script&gt;", content)
+        self.assertIn("bank: export.csv · line 3", content)

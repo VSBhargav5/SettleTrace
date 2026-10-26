@@ -64,7 +64,32 @@ def render_html(result: dict, manifest: dict) -> str:
         </article>""")
     sources = "".join(f"<li><strong>{esc(label)}</strong>: {esc(info['name'])} "
                       f"<code>{esc(info['sha256'])}</code></li>" for label, info in manifest["inputs"].items())
+    payout_rows = []
+    for payout in result.get("payouts", []):
+        nets = payout["processor_net_by_currency"]
+        processor = "<br>".join(esc(format_minor(amount, currency)) for currency, amount in nets.items()) or "Not observed"
+        bank = payout["bank"]
+        observed = esc(format_minor(bank["amount_minor"], bank["currency"])) if bank else "Not observed"
+        delta = (esc(format_minor(payout["delta_minor"], bank["currency"]))
+                 if payout["delta_minor"] is not None else "Not compared")
+        evidence = "".join(f"<li>{esc(item['source'])}: {esc(manifest['inputs'][item['source']]['name'])} "
+                           f"· line {esc(item['row'])} · <code>{esc(item['id'])}</code></li>"
+                           for item in payout["evidence"])
+        payout_rows.append(f"<tr><th scope='row'><code>{esc(payout['payout_id'])}</code>"
+                           f"<details><summary>Source evidence</summary><ul>{evidence}</ul></details></th>"
+                           f"<td>{esc(payout['status'].replace('_', ' '))}</td><td>{payout['entry_count']}</td>"
+                           f"<td>{processor}</td><td>{observed}</td><td>{delta}</td></tr>")
+    payouts = ("<h2>Payout ledger</h2><p class='note'>Each explicit payout is checked separately. "
+               "Matching totals do not establish complete records.</p><div class='table-wrap'><table>"
+               "<thead><tr><th>Payout / evidence</th><th>Status</th><th>Entries</th><th>Processor net</th>"
+               "<th>Bank amount</th><th>Bank − net</th></tr></thead><tbody>" + "".join(payout_rows)
+               + "</tbody></table></div>") if payout_rows else ""
     empty = "<p class='empty'>The supplied records agree under the documented matching rules.</p>"
+    configuration = manifest.get("configuration", {})
+    contract = ("<h2>Import contract</h2><p class='note'>Processor format: <code>"
+                + esc(configuration["processor_format"]) + "</code> · decimal separator: <code>"
+                + esc(configuration["decimal_separator"]) + "</code> · exit policy: <code>"
+                + esc(configuration.get("fail_on", "any")) + "</code></p>") if configuration else ""
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
@@ -97,7 +122,7 @@ details{{font-size:13px}}code{{overflow-wrap:anywhere}}.sources{{font-size:12px;
 <div class="metric"><strong>{summary['findings']}</strong><span>Exceptions to review</span></div></section>
 <h2>Observed totals by currency</h2><p class="note">Processor net = gross − fees. Currencies are kept separate; no exchange rates are inferred.</p>
 <div class="table-wrap"><table><thead><tr><th>Currency</th><th>Processor gross</th><th>Fees / credits</th><th>Processor net</th><th>Bank records</th></tr></thead><tbody>{''.join(totals)}</tbody></table></div>
-<h2>Exceptions and evidence</h2>{''.join(cards) or empty}
-<h2>Input fingerprints</h2><ul class="sources">{sources}</ul>
-<footer>Observations apply only to the supplied files. An absent record can reflect the observation window or incomplete mapping; it is not proof of missing cash. Raw provider exports, FX, split captures, split deposits, and accounting advice are outside v0.1.</footer>
+{payouts}<h2>Exceptions and evidence</h2>{''.join(cards) or empty}
+{contract}<h2>Input fingerprints</h2><ul class="sources">{sources}</ul>
+<footer>Observations apply only to the supplied files under the selected CSV contract. An absent record can reflect the observation window or incomplete mapping; it is not proof of missing cash. FX, split captures, split deposits, and accounting advice are outside the supported scope.</footer>
 </main></body></html>"""
