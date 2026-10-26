@@ -10,6 +10,13 @@ from settletrace.models import InputError
 
 
 class CaptureLimitTests(unittest.TestCase):
+    def test_huge_cli_limit_fails_before_it_can_overflow_a_file_read(self):
+        stderr = io.StringIO()
+        with redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+            main(["normalize-stripe", "--input", "unused", "--output", "unused", "--max-input-bytes", str(10**100)])
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("between 1 and", stderr.getvalue())
+
     def test_exact_byte_limit_accepts_and_one_more_rejects(self):
         with tempfile.TemporaryDirectory() as temporary:
             source = Path(temporary) / "data"

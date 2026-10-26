@@ -18,6 +18,7 @@ from .verify import verify_bundle
 
 
 DEFAULT_MAX_INPUT_BYTES = 16 * 1024 * 1024
+MAX_CAPTURE_BYTES = 256 * 1024 * 1024
 
 
 def _positive_limit(value: str) -> int:
@@ -25,8 +26,8 @@ def _positive_limit(value: str) -> int:
         result = int(value)
     except ValueError as exc:
         raise argparse.ArgumentTypeError("byte limit must be a positive integer") from exc
-    if result <= 0:
-        raise argparse.ArgumentTypeError("byte limit must be a positive integer")
+    if not 0 < result <= MAX_CAPTURE_BYTES:
+        raise argparse.ArgumentTypeError(f"byte limit must be between 1 and {MAX_CAPTURE_BYTES}")
     return result
 
 
