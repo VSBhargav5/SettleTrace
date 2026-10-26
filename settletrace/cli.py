@@ -9,6 +9,7 @@ from pathlib import Path
 import sys
 
 from . import __version__
+from .compare import compare_findings
 from .engine import reconcile
 from .ingest import ENTRY_FIELDS, parse_deposits, parse_entries, parse_sales
 from .models import InputError
@@ -137,8 +138,19 @@ def main(argv: list[str] | None = None) -> int:
     verify.add_argument("--bundle", type=Path, required=True)
     for source in ("sales", "processor", "bank"):
         verify.add_argument("--" + source, type=Path)
+    compare = commands.add_parser("compare", help="Compare observed findings in two verified report bundles")
+    compare.add_argument("--baseline", type=Path, required=True)
+    compare.add_argument("--current", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
+        if args.command == "compare":
+            baseline, current = verify_bundle(args.baseline), verify_bundle(args.current)
+            comparison = compare_findings(baseline["report"], current["report"])
+            comparison["input_changes"] = [source for source in ("sales", "processor", "bank")
+                                            if baseline["manifest"]["inputs"][source]["sha256"]
+                                            != current["manifest"]["inputs"][source]["sha256"]]
+            print(_json(comparison), end="")
+            return 0
         if args.command == "verify":
             checked = verify_bundle(args.bundle)
             paths = {source: getattr(args, source) for source in ("sales", "processor", "bank") if getattr(args, source) is not None}

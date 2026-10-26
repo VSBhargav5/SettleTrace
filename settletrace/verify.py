@@ -76,6 +76,8 @@ def _report(value: dict) -> None:
              "Matched counts exceed observed records")
     for finding in findings:
         _require(isinstance(finding, dict), "Malformed finding")
+        _require(set(finding) <= {"code", "severity", "reference", "message", "evidence", "details"},
+                 "Unsupported finding fields for report schema 1")
         for key in ("code", "reference", "message"):
             _require(isinstance(finding.get(key), str) and bool(finding[key]), f"Invalid finding {key}")
         _require(isinstance(finding.get("severity"), str) and finding["severity"] in {"error", "review"}, "Invalid finding severity")
@@ -88,6 +90,8 @@ def _report(value: dict) -> None:
         if "details" in finding:
             details = finding["details"]
             _require(isinstance(details, dict), "Malformed finding details")
+            _require(set(details) == {"currency", "expected_minor", "observed_minor", "delta_minor"},
+                     "Unsupported amount evidence fields")
             _require(isinstance(details.get("currency"), str) and details["currency"] in SUPPORTED_CURRENCIES
                      and all(_integer(details.get(key)) for key in ("expected_minor", "observed_minor", "delta_minor")),
                      "Malformed amount evidence")
