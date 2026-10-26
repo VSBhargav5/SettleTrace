@@ -1,14 +1,16 @@
 """Command-line entry point with explicit outcome codes and reproducible bundles."""
 
 import argparse
+import csv
 import hashlib
+import io
 import json
 from pathlib import Path
 import sys
 
 from . import __version__
 from .engine import reconcile
-from .ingest import parse_deposits, parse_entries, parse_sales
+from .ingest import ENTRY_FIELDS, parse_deposits, parse_entries, parse_sales
 from .models import InputError
 from .report import findings_csv, render_html
 from .stripe import parse_stripe
@@ -46,14 +48,7 @@ def _read_inputs(args: argparse.Namespace) -> tuple:
     return sales, entries, deposits, fingerprints
 
 
-def _bundle(result: dict, inputs: dict, output: Path, configuration: dict | None = None) -> None:
-    manifest = {"schema_version": "1", "tool_version": __version__, "inputs": inputs,
-                "configuration": configuration or {"processor_format": "canonical", "decimal_separator": "."}}
-    payloads = {
-        "report.json": _json(result),
-        "findings.csv": findings_csv(result),
-        "report.html": render_html(result, manifest),
-    }
+def _write_pack(output: Path, payloads: dict[str, str], manifest: dict, marker: str) -> None:
     manifest["outputs"] = {
         name: {"sha256": hashlib.sha256(content.encode("utf-8")).hexdigest()}
         for name, content in sorted(payloads.items())
@@ -63,9 +58,37 @@ def _bundle(result: dict, inputs: dict, output: Path, configuration: dict | None
     for name, content in payloads.items():
         (output / name).write_text(content, encoding="utf-8", newline="")
     # Publish the marker only after its entire content has been written and closed.
-    staging = output / ".manifest.json.tmp"
+    staging = output / ("." + marker + ".tmp")
     staging.write_text(_json(manifest), encoding="utf-8", newline="")
-    staging.rename(output / "manifest.json")
+    staging.rename(output / marker)
+
+
+def _bundle(result: dict, inputs: dict, output: Path, configuration: dict | None = None) -> None:
+    manifest = {"schema_version": "1", "tool_version": __version__, "inputs": inputs,
+                "configuration": configuration or {"processor_format": "canonical", "decimal_separator": "."}}
+    payloads = {"report.json": _json(result), "findings.csv": findings_csv(result),
+                "report.html": render_html(result, manifest)}
+    _write_pack(output, payloads, manifest, "manifest.json")
+
+
+def _normalize(args: argparse.Namespace) -> None:
+    if args.output.exists():
+        raise InputError(f"Output path already exists: {args.output}; choose a new directory")
+    data = args.input.read_bytes()
+    entries = parse_stripe(data, str(args.input), decimal_separator=args.decimal_separator)
+    if not entries:
+        raise InputError("No processor records to normalize")
+    stream = io.StringIO(newline="")
+    writer = csv.DictWriter(stream, fieldnames=ENTRY_FIELDS)
+    writer.writeheader()
+    for entry in entries:
+        writer.writerow({field: getattr(entry, field) for field in ENTRY_FIELDS})
+    audit = {"schema_version": "1", "tool_version": __version__,
+             "input": _fingerprint(args.input, data),
+             "configuration": {"processor_format": "stripe-payout-itemized-7", "decimal_separator": args.decimal_separator},
+             "rows": [{"transaction_id": entry.transaction_id, "canonical_row": index + 2, "source_row": entry.row}
+                      for index, entry in enumerate(entries)]}
+    _write_pack(args.output, {"processor.csv": stream.getvalue()}, audit, "audit.json")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -77,8 +100,16 @@ def main(argv: list[str] | None = None) -> int:
     command.add_argument("--output", type=Path, required=True, help="New output directory; existing paths are never overwritten")
     validate = commands.add_parser("validate", help="Validate input contracts without writing a report")
     _input_arguments(validate)
+    normalize = commands.add_parser("normalize-stripe", help="Export canonical activity and raw-row mapping from a Stripe itemized.7 CSV")
+    normalize.add_argument("--input", type=Path, required=True)
+    normalize.add_argument("--output", type=Path, required=True)
+    normalize.add_argument("--decimal-separator", choices=(".", ","), default=".")
     args = parser.parse_args(argv)
     try:
+        if args.command == "normalize-stripe":
+            _normalize(args)
+            print(f"SettleTrace: canonical activity and source-row audit written to {args.output}")
+            return 0
         if args.command == "reconcile" and args.output.exists():
             raise InputError(f"Output path already exists: {args.output}; choose a new directory")
         sales, entries, deposits, fingerprints = _read_inputs(args)
