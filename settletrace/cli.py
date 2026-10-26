@@ -16,6 +16,27 @@ from .report import findings_csv, render_html
 from .stripe import parse_stripe
 
 
+DEFAULT_MAX_INPUT_BYTES = 16 * 1024 * 1024
+
+
+def _positive_limit(value: str) -> int:
+    try:
+        result = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("byte limit must be a positive integer") from exc
+    if result <= 0:
+        raise argparse.ArgumentTypeError("byte limit must be a positive integer")
+    return result
+
+
+def _capture(path: Path, limit: int) -> bytes:
+    with path.open("rb") as stream:
+        data = stream.read(limit + 1)
+    if len(data) > limit:
+        raise InputError(f"{path}: input exceeds --max-input-bytes={limit}")
+    return data
+
+
 def _fingerprint(path: Path, data: bytes) -> dict:
     return {"name": path.name, "sha256": hashlib.sha256(data).hexdigest(), "size_bytes": len(data)}
 
@@ -30,12 +51,14 @@ def _input_arguments(command: argparse.ArgumentParser) -> None:
     command.add_argument("--bank", type=Path, required=True)
     command.add_argument("--processor-format", choices=("canonical", "stripe-payout-itemized-7"), default="canonical")
     command.add_argument("--decimal-separator", choices=(".", ","), default=".")
+    command.add_argument("--max-input-bytes", type=_positive_limit, default=DEFAULT_MAX_INPUT_BYTES,
+                         help="Maximum bytes captured per input (default: 16777216)")
 
 
 def _read_inputs(args: argparse.Namespace) -> tuple:
     paths = {"sales": args.sales, "processor": args.processor, "bank": args.bank}
     # Each immutable snapshot supplies both the hash and the parsed records.
-    snapshots = {name: path.read_bytes() for name, path in paths.items()}
+    snapshots = {name: _capture(path, args.max_input_bytes) for name, path in paths.items()}
     fingerprints = {name: _fingerprint(path, snapshots[name]) for name, path in paths.items()}
     sales = parse_sales(snapshots["sales"], str(args.sales))
     if args.processor_format == "canonical":
@@ -74,7 +97,7 @@ def _bundle(result: dict, inputs: dict, output: Path, configuration: dict | None
 def _normalize(args: argparse.Namespace) -> None:
     if args.output.exists():
         raise InputError(f"Output path already exists: {args.output}; choose a new directory")
-    data = args.input.read_bytes()
+    data = _capture(args.input, args.max_input_bytes)
     entries = parse_stripe(data, str(args.input), decimal_separator=args.decimal_separator)
     if not entries:
         raise InputError("No processor records to normalize")
@@ -85,7 +108,8 @@ def _normalize(args: argparse.Namespace) -> None:
         writer.writerow({field: getattr(entry, field) for field in ENTRY_FIELDS})
     audit = {"schema_version": "1", "tool_version": __version__,
              "input": _fingerprint(args.input, data),
-             "configuration": {"processor_format": "stripe-payout-itemized-7", "decimal_separator": args.decimal_separator},
+             "configuration": {"processor_format": "stripe-payout-itemized-7", "decimal_separator": args.decimal_separator,
+                               "max_input_bytes": args.max_input_bytes},
              "rows": [{"transaction_id": entry.transaction_id, "canonical_row": index + 2, "source_row": entry.row}
                       for index, entry in enumerate(entries)]}
     _write_pack(args.output, {"processor.csv": stream.getvalue()}, audit, "audit.json")
@@ -106,6 +130,7 @@ def main(argv: list[str] | None = None) -> int:
     normalize.add_argument("--input", type=Path, required=True)
     normalize.add_argument("--output", type=Path, required=True)
     normalize.add_argument("--decimal-separator", choices=(".", ","), default=".")
+    normalize.add_argument("--max-input-bytes", type=_positive_limit, default=DEFAULT_MAX_INPUT_BYTES)
     args = parser.parse_args(argv)
     try:
         if args.command == "normalize-stripe":
@@ -123,7 +148,8 @@ def main(argv: list[str] | None = None) -> int:
                          "note": "Input contracts are valid; any reconciliation findings still need investigation."}), end="")
             return 0
         _bundle(result, fingerprints, args.output, {"processor_format": args.processor_format,
-                                                  "decimal_separator": args.decimal_separator, "fail_on": args.fail_on})
+                                                  "decimal_separator": args.decimal_separator, "fail_on": args.fail_on,
+                                                  "max_input_bytes": args.max_input_bytes})
     except (InputError, OSError) as exc:
         print(f"SettleTrace input/output error: {exc}", file=sys.stderr)
         return 2
