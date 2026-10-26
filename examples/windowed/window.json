@@ -1,0 +1,27 @@
+{
+  "schema_version": "1",
+  "account_scope": "synthetic-single-account",
+  "sources": {
+    "sales": {
+      "start_utc": "2026-10-01T00:00:00Z",
+      "end_utc": "2026-11-01T00:00:00Z",
+      "time_basis": "captured_at_utc",
+      "sha256": "8f4ba06544af2542466fcb396254dedf709d863090db1e3bc6c81bacf23acc78",
+      "size_bytes": 69
+    },
+    "processor": {
+      "start_utc": "2026-10-01T00:00:00Z",
+      "end_utc": "2026-11-01T00:00:00Z",
+      "time_basis": "automatic_payout_effective_at_utc",
+      "sha256": "3f0160119be052d09a69d742f0ee61ed0065411bd67761c26f13fb5274367c0f",
+      "size_bytes": 218
+    },
+    "bank": {
+      "start_utc": "2026-10-01T00:00:00Z",
+      "end_utc": "2026-11-05T00:00:00Z",
+      "time_basis": "bank_posted_at_utc",
+      "sha256": "6d3b79a84992cc82c0b8856dd6d04f8d57144aa641658dee4e5fbe4ef4b5f798",
+      "size_bytes": 70
+    }
+  }
+}

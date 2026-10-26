@@ -74,10 +74,12 @@ and [report selection](https://docs.stripe.com/reports/select-a-report).
 The itemized.7 subset is implemented against documented columns and synthetic
 fixtures, with exact conversion, explicit identities, unsupported-category
 rejection, and source-row evidence. It has not been tested with a real account
-export. Next, establish an observation-window contract and a verified bank
-mapping workflow. Neither is implied by having a processor adapter or matching
-a net total. Compare an actual operator's workflow only when suitable data and
-authorization are available.
+export. v0.3 adds a hash-bound operator declaration of observation intervals and
+an explicit one-to-one bank mapping with replay verification. It does not check
+row timestamps, account identity, or completeness. Next, validate the actual
+import/mapping workflow against a permitted real-account export and operator
+process. A stronger completeness claim needs event-time and coverage evidence;
+it is not implied by matching a net total. Use suitable data and authorization.
 
 ## Validate before monetizing
 
