@@ -202,7 +202,8 @@ def main(argv: list[str] | None = None) -> int:
             paths = {source: getattr(args, source) for source in ("sales", "processor", "bank", "window")
                      if getattr(args, source) is not None}
             if paths:
-                verify_sources(checked["manifest"], paths)
+                verify_sources(checked["manifest"], paths,
+                               window_declaration=checked["report"].get("observation_window", {}).get("declaration"))
                 print("SettleTrace: all three supplied source files match the recorded fingerprints."
                       + (" Observation declaration bytes also match." if "window" in paths else ""))
             print(f"SettleTrace: bundle hashes verified; {checked['report']['summary']['findings']} finding(s) remain in the report.")

@@ -9,6 +9,7 @@ from .models import InputError
 
 TIME_BASES = {"sales": "captured_at_utc", "processor": "automatic_payout_effective_at_utc",
               "bank": "bank_posted_at_utc"}
+MAX_WINDOW_BYTES = 1024 * 1024
 _UTC = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\Z")
 _HASH = re.compile(r"[0-9a-f]{64}\Z")
 
@@ -34,6 +35,10 @@ def validate_window(value: dict) -> None:
     scope = value["account_scope"]
     _require(isinstance(scope, str) and bool(scope.strip()) and scope == scope.strip(),
              "account_scope must be a nonblank, unpadded operator label")
+    try:
+        scope.encode("utf-8")
+    except UnicodeError as exc:
+        raise InputError("Observation window: account_scope must be encodable as UTF-8") from exc
     sources = value["sources"]
     _require(isinstance(sources, dict) and set(sources) == set(TIME_BASES),
              "sources must describe sales, processor, and bank")
@@ -53,6 +58,7 @@ def validate_window(value: dict) -> None:
 def parse_window(data: bytes, source: str = "window.json") -> dict:
     if not isinstance(data, bytes):
         raise TypeError("data must be an immutable bytes snapshot")
+    _require(len(data) <= MAX_WINDOW_BYTES, "declaration exceeds the 1 MiB limit")
 
     def object_pairs(pairs):
         result = {}

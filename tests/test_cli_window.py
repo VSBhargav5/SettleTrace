@@ -129,3 +129,21 @@ class WindowCliTests(unittest.TestCase):
         self.assertEqual(code, 1)
         checked = verify_bundle(self.root / "pack")
         self.assertEqual(checked["report"]["findings"][0]["code"], "BANK_DEPOSIT_NOT_OBSERVED")
+
+    def test_rehashed_report_cannot_substitute_dates_for_original_window_bytes(self):
+        self.assertEqual(self.reconcile()[0], 0)
+        directory = self.root / "pack"
+        report = json.loads((directory / "report.json").read_text())
+        for source in report["observation_window"]["declaration"]["sources"].values():
+            source["end_utc"] = "2026-12-01T00:00:00Z"
+        data = json.dumps(report).encode()
+        (directory / "report.json").write_bytes(data)
+        manifest = json.loads((directory / "manifest.json").read_text())
+        manifest["outputs"]["report.json"]["sha256"] = hashlib.sha256(data).hexdigest()
+        (directory / "manifest.json").write_text(json.dumps(manifest))
+        # Bundle consistency alone does not authenticate its declared sources.
+        verify_bundle(directory)
+        code, out, err = self.invoke("verify", "--bundle", str(directory), *self.sources(), "--window", str(self.window))
+        self.assertEqual(code, 2)
+        self.assertEqual(out, "")
+        self.assertIn("declaration disagrees", err)

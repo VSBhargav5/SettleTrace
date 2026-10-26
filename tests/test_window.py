@@ -3,7 +3,7 @@ import json
 import unittest
 
 from settletrace.models import InputError
-from settletrace.window import TIME_BASES, assess_window, parse_window
+from settletrace.window import MAX_WINDOW_BYTES, TIME_BASES, assess_window, parse_window
 
 
 def declaration():
@@ -78,3 +78,11 @@ class WindowTests(unittest.TestCase):
         self.assertEqual(parse_window(b'\xef\xbb\xbf' + data), declaration())
         with self.assertRaises(TypeError):
             parse_window(data.decode())
+
+    def test_lone_surrogate_and_oversized_declaration_are_clean_input_errors(self):
+        value = declaration()
+        value["account_scope"] = "\ud800"
+        with self.assertRaisesRegex(InputError, "UTF-8"):
+            self.parse(value)
+        with self.assertRaisesRegex(InputError, "1 MiB"):
+            parse_window(b" " * (MAX_WINDOW_BYTES + 1))
