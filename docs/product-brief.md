@@ -27,9 +27,10 @@ for remains unvalidated. Existing accounting integrations are also alternatives;
 the [Synder listing in Stripe's marketplace](https://marketplace.stripe.com/apps/synder)
 describes syncing sales, fees, refunds, taxes, and payouts into accounting systems.
 
-## What v0.1 actually does
+## What the tool actually does
 
-The CLI reads three **canonical SettleTrace CSVs**, not raw Stripe or bank exports:
+The CLI reads canonical sales/bank CSVs and either canonical processor activity
+or the explicitly selected [Stripe itemized.7 subset](stripe-import.md):
 
 - Captured sales with unique sale and payment references.
 - Processor activity with explicit payment and payout references, signed gross
@@ -53,7 +54,7 @@ model inference is needed.
 The inputs must already contain reliable payment and payout references. The tool
 does not infer a bank-to-payout mapping from a date or amount. It supports one
 deposit record per payout and one captured sale per payment reference; split
-captures, split deposits, FX, and automatic fuzzy matching are outside v0.1.
+captures, split deposits, FX, and automatic fuzzy matching remain outside scope.
 
 There is no transaction-date model or completeness proof. An absent charge or
 deposit means it was not observed in the supplied files. It may be outside the
@@ -70,14 +71,13 @@ and [report selection](https://docs.stripe.com/reports/select-a-report).
 
 ## Smallest next milestone
 
-Implement one explicit mapping from a documented raw Stripe itemized export to
-the canonical processor schema, with synthetic fixtures and rejected unsupported
-cases. Stripe API amounts use smallest units, while its financial CSV amount
-columns use major units; the adapter must parse decimals exactly and document
-currency and sign rules. See the [balance transaction
-object](https://docs.stripe.com/api/balance_transactions/object) and
-[currency rules](https://docs.stripe.com/currencies). A validated bank mapping and
-observation-window contract are separate work, not implied by a processor adapter.
+The itemized.7 subset is implemented against documented columns and synthetic
+fixtures, with exact conversion, explicit identities, unsupported-category
+rejection, and source-row evidence. It has not been tested with a real account
+export. Next, establish an observation-window contract and a verified bank
+mapping workflow. Neither is implied by having a processor adapter or matching
+a net total. Compare an actual operator's workflow only when suitable data and
+authorization are available.
 
 ## Validate before monetizing
 

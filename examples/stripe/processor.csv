@@ -1,0 +1,3 @@
+balance_transaction_id,charge_id,automatic_payout_id,reporting_category,currency,gross,fee,net,source_id
+txn_demo_charge,ch_demo,po_demo,charge,usd,100.00,3.50,96.50,ch_demo
+txn_demo_refund,ch_demo,po_demo,refund,usd,-20.00,0.00,-20.00,re_demo

@@ -30,8 +30,23 @@ jobs:
         run: settletrace --version
       - name: Generate clean demonstration
         run: settletrace reconcile --sales examples/clean/sales.csv --processor examples/clean/processor.csv --bank examples/clean/bank.csv --output output/clean
+      - name: Validate documented Stripe import
+        run: settletrace validate --sales examples/stripe/sales.csv --processor examples/stripe/processor.csv --bank examples/stripe/bank.csv --processor-format stripe-payout-itemized-7
+      - name: Generate Stripe demonstration
+        run: settletrace reconcile --sales examples/stripe/sales.csv --processor examples/stripe/processor.csv --bank examples/stripe/bank.csv --processor-format stripe-payout-itemized-7 --output output/stripe
+      - name: Verify bundle and original source bytes
+        run: settletrace verify --bundle output/stripe --sales examples/stripe/sales.csv --processor examples/stripe/processor.csv --bank examples/stripe/bank.csv
+      - name: Export canonical records and raw-row audit
+        run: settletrace normalize-stripe --input examples/stripe/processor.csv --output output/normalized
+      - name: Compare verified observation packs
+        run: settletrace compare --baseline output/stripe --current output/stripe
+      - name: Validate explicitly selected comma decimals
+        run: settletrace validate --sales examples/stripe-comma/sales.csv --processor examples/stripe-comma/processor.csv --bank examples/stripe-comma/bank.csv --processor-format stripe-payout-itemized-7 --decimal-separator ,
       - name: Upload synthetic report for inspection
         uses: actions/upload-artifact@v4
         with:
-          name: clean-report-${{ matrix.os }}-${{ matrix.python }}
-          path: output/clean/
+          name: reconciliation-evidence-${{ matrix.os }}-${{ matrix.python }}
+          path: |
+            output/clean/
+            output/stripe/
+            output/normalized/
