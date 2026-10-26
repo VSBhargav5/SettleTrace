@@ -6,12 +6,17 @@ from .models import InputError, SUPPORTED_CURRENCIES
 
 
 _AMOUNT = re.compile(r"([+-]?)([0-9]+)(?:\.([0-9]{1,2}))?\Z")
+_COMMA_AMOUNT = re.compile(r"([+-]?)([0-9]+)(?:,([0-9]{1,2}))?\Z")
 
 
-def to_minor(value: str, currency: str) -> int:
+def to_minor(value: str, currency: str, *, decimal_separator: str = ".") -> int:
+    """Parse only the explicitly selected decimal separator, without guessing."""
+    if decimal_separator not in (".", ","):
+        raise InputError("decimal_separator must be '.' or ','")
     if not isinstance(currency, str) or currency not in SUPPORTED_CURRENCIES:
         raise InputError("Unsupported currency; expected USD, EUR, GBP, or INR")
-    match = _AMOUNT.fullmatch(value) if isinstance(value, str) else None
+    pattern = _AMOUNT if decimal_separator == "." else _COMMA_AMOUNT
+    match = pattern.fullmatch(value) if isinstance(value, str) else None
     if match is None:
         raise InputError("Amount must be an ASCII decimal with at most two fractional digits")
     sign, whole, fraction = match.groups()

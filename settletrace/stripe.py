@@ -19,12 +19,13 @@ def parse_stripe(data: bytes, source: str, *, decimal_separator: str = ".") -> l
 
     References are explicit and never normalized. Evidence uses each record's
     ending physical line. Charges, refunds and debit disputes are supported;
-    refund/dispute gross must be negative. Decimal amounts use a dot.
+    refund/dispute gross must be negative. Select dot or comma decimal amounts
+    explicitly; the CSV column delimiter is always a comma.
     """
     if not isinstance(data, bytes):
         raise TypeError("data must be an immutable bytes snapshot")
-    if decimal_separator != ".":
-        raise InputError(f"{source}:1: only dot decimal amounts are currently supported")
+    if decimal_separator not in (".", ","):
+        raise InputError(f"{source}:1: decimal_separator must be '.' or ','")
     reader = None
 
     def invalid(message: str, line: int | None = None) -> InputError:
@@ -64,7 +65,8 @@ def parse_stripe(data: bytes, source: str, *, decimal_separator: str = ".") -> l
                     raise invalid("currency must be a supported three-letter ASCII code", line)
                 currency = raw_currency.upper()
                 try:
-                    amounts = {field: to_minor(row[field], currency) for field in ("gross", "fee", "net")}
+                    amounts = {field: to_minor(row[field], currency, decimal_separator=decimal_separator)
+                               for field in ("gross", "fee", "net")}
                     entry = Entry(
                         transaction_id=transaction_id,
                         payment_ref=row["charge_id"],

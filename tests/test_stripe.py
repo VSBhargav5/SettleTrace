@@ -74,9 +74,33 @@ class StripeTests(unittest.TestCase):
         self.assertEqual(self.parse(HEADER), [])
         self.assert_invalid("", "empty file", line=1)
 
-    def test_decimal_separator_must_be_explicitly_supported(self):
+    def test_wrong_decimal_separator_does_not_autodetect_dot_amounts(self):
         with self.assertRaises(InputError):
             parse_stripe((HEADER + CHARGE).encode("utf-8"), "stripe.csv", decimal_separator=",")
+
+    def test_explicit_quoted_comma_decimals_preserve_charge_and_debit_refund(self):
+        text = HEADER + 'txn_1,ch_1,po_1,charge,eur,"100,00","3,50","96,50"\n'
+        text += 'txn_refund,ch_1,po_1,refund,eur,"-20,00","-0,50","-19,50"\n'
+        entries = parse_stripe(text.encode("utf-8"), "stripe.csv", decimal_separator=",")
+        self.assertEqual([(entry.gross_minor, entry.fee_minor, entry.net_minor) for entry in entries],
+                         [(10000, 350, 9650), (-2000, -50, -1950)])
+        report = reconcile([Sale("sale_1", "ch_1", "EUR", 10000)], entries,
+                           [Deposit("bank_1", "po_1", "EUR", 7700)])
+        self.assertEqual(report["findings"], [])
+        with self.assertRaises(InputError):
+            parse_stripe(text.encode("utf-8"), "stripe.csv")
+
+    def test_comma_mode_does_not_change_csv_delimiter_or_allow_mixed_amounts(self):
+        text = HEADER + 'txn_1,ch_1,po_1,charge,eur,"100,00",3.50,"96,50"\n'
+        with self.assertRaises(InputError):
+            parse_stripe(text.encode("utf-8"), "stripe.csv", decimal_separator=",")
+        with self.assertRaises(InputError):
+            parse_stripe((HEADER + CHARGE).replace(",", ";").encode("utf-8"), "stripe.csv", decimal_separator=",")
+
+    def test_unsupported_decimal_separator_reports_source_location(self):
+        with self.assertRaises(InputError) as caught:
+            parse_stripe((HEADER + CHARGE).encode("utf-8"), "stripe.csv", decimal_separator="auto")
+        self.assertIn("stripe.csv:1:", str(caught.exception))
 
     def test_refund_and_debit_dispute_preserve_signed_fees_and_original_charge(self):
         rows = (

@@ -26,3 +26,23 @@ class MoneyTests(unittest.TestCase):
         for currency in ("JPY", "KWD", "usd", "USD ", "", None, []):
             with self.subTest(currency=currency), self.assertRaises(InputError):
                 to_minor("1.00", currency)
+
+    def test_explicit_comma_decimal_keeps_exact_signed_minor_units(self):
+        for value, expected in (("19,99", 1999), ("19,9", 1990), ("19", 1900),
+                                ("-0,01", -1), ("+0,05", 5), ("-0,00", 0)):
+            with self.subTest(value=value):
+                self.assertEqual(to_minor(value, "EUR", decimal_separator=","), expected)
+        whole = "9" * 100
+        self.assertEqual(to_minor(whole + ",07", "INR", decimal_separator=","), int(whole) * 100 + 7)
+
+    def test_wrong_or_mixed_separator_grouping_and_excess_precision_are_rejected(self):
+        for separator, values in ((".", ("1,00", "1,000.00", "1.000,00")),
+                                  (",", ("1.00", "1.000,00", "1,000.00", "1,001", "1,000", " 1,00", "1,00 ", ",50", "1,"))):
+            for value in values:
+                with self.subTest(separator=separator, value=value), self.assertRaises(InputError):
+                    to_minor(value, "EUR", decimal_separator=separator)
+
+    def test_unsupported_decimal_separator_is_not_inferred(self):
+        for separator in (";", "", "auto", None, []):
+            with self.subTest(separator=separator), self.assertRaises(InputError):
+                to_minor("1.00", "USD", decimal_separator=separator)
