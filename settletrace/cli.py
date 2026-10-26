@@ -9,9 +9,10 @@ from pathlib import Path
 import sys
 
 from . import __version__
+from .bank import map_bank
 from .compare import compare_findings
 from .engine import reconcile
-from .ingest import ENTRY_FIELDS, parse_deposits, parse_entries, parse_sales
+from .ingest import DEPOSIT_FIELDS, ENTRY_FIELDS, parse_deposits, parse_entries, parse_sales
 from .models import InputError
 from .report import findings_csv, render_html
 from .stripe import parse_stripe
@@ -123,6 +124,25 @@ def _normalize(args: argparse.Namespace) -> None:
     _write_pack(args.output, {"processor.csv": canonical}, audit, "audit.json")
 
 
+def _map_bank(args: argparse.Namespace) -> None:
+    if args.output.exists():
+        raise InputError(f"Output path already exists: {args.output}; choose a new directory")
+    bank = _capture(args.bank, args.max_input_bytes)
+    mapping = _capture(args.mapping, args.max_input_bytes)
+    deposits, rows = map_bank(bank, mapping, str(args.bank), str(args.mapping))
+    stream = io.StringIO(newline="")
+    writer = csv.DictWriter(stream, fieldnames=DEPOSIT_FIELDS)
+    writer.writeheader()
+    for deposit in deposits:
+        writer.writerow({field: getattr(deposit, field) for field in DEPOSIT_FIELDS})
+    canonical = stream.getvalue()
+    normalized = parse_deposits(canonical.encode("utf-8"), "bank.csv")
+    audit = {"schema_version": "1", "tool_version": __version__,
+             "inputs": {"bank": _fingerprint(args.bank, bank), "mapping": _fingerprint(args.mapping, mapping)},
+             "rows": [{**row, "canonical_row": record.row} for row, record in zip(rows, normalized)]}
+    _write_pack(args.output, {"bank.csv": canonical}, audit, "audit.json")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="settletrace", description="Trace exceptions in supplied payment records, offline.")
     parser.add_argument("--version", action="version", version=__version__)
@@ -139,6 +159,11 @@ def main(argv: list[str] | None = None) -> int:
     normalize.add_argument("--output", type=Path, required=True)
     normalize.add_argument("--decimal-separator", choices=(".", ","), default=".")
     normalize.add_argument("--max-input-bytes", type=_positive_limit, default=DEFAULT_MAX_INPUT_BYTES)
+    bank_map = commands.add_parser("map-bank", help="Apply an explicit one-to-one payout mapping to a prepared bank extract")
+    bank_map.add_argument("--bank", type=Path, required=True)
+    bank_map.add_argument("--mapping", type=Path, required=True)
+    bank_map.add_argument("--output", type=Path, required=True)
+    bank_map.add_argument("--max-input-bytes", type=_positive_limit, default=DEFAULT_MAX_INPUT_BYTES)
     verify = commands.add_parser("verify", help="Check a completed report bundle's recorded hashes")
     verify.add_argument("--bundle", type=Path, required=True)
     for source in ("sales", "processor", "bank"):
@@ -148,6 +173,10 @@ def main(argv: list[str] | None = None) -> int:
     compare.add_argument("--current", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
+        if args.command == "map-bank":
+            _map_bank(args)
+            print(f"SettleTrace: explicitly mapped bank records and source-row audit written to {args.output}")
+            return 0
         if args.command == "compare":
             baseline, current = verify_bundle(args.baseline), verify_bundle(args.current)
             comparison = compare_findings(baseline["report"], current["report"])
