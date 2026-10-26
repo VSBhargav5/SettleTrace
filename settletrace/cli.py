@@ -10,9 +10,10 @@ import sys
 
 from . import __version__
 from .bank import map_bank
+from .bankpack import render_bank, verify_bank_map
 from .compare import compare_findings
 from .engine import reconcile
-from .ingest import DEPOSIT_FIELDS, ENTRY_FIELDS, parse_deposits, parse_entries, parse_sales
+from .ingest import ENTRY_FIELDS, parse_deposits, parse_entries, parse_sales
 from .models import InputError
 from .report import findings_csv, render_html
 from .stripe import parse_stripe
@@ -132,12 +133,7 @@ def _map_bank(args: argparse.Namespace) -> None:
     bank = _capture(args.bank, args.max_input_bytes)
     mapping = _capture(args.mapping, args.max_input_bytes)
     deposits, rows = map_bank(bank, mapping, str(args.bank), str(args.mapping))
-    stream = io.StringIO(newline="")
-    writer = csv.DictWriter(stream, fieldnames=DEPOSIT_FIELDS)
-    writer.writeheader()
-    for deposit in deposits:
-        writer.writerow({field: getattr(deposit, field) for field in DEPOSIT_FIELDS})
-    canonical = stream.getvalue()
+    canonical = render_bank(deposits)
     normalized = parse_deposits(canonical.encode("utf-8"), "bank.csv")
     audit = {"schema_version": "1", "tool_version": __version__,
              "inputs": {"bank": _fingerprint(args.bank, bank), "mapping": _fingerprint(args.mapping, mapping)},
@@ -166,6 +162,11 @@ def main(argv: list[str] | None = None) -> int:
     bank_map.add_argument("--mapping", type=Path, required=True)
     bank_map.add_argument("--output", type=Path, required=True)
     bank_map.add_argument("--max-input-bytes", type=_positive_limit, default=DEFAULT_MAX_INPUT_BYTES)
+    bank_verify = commands.add_parser("verify-bank-map", help="Replay a completed bank mapping against both original source files")
+    bank_verify.add_argument("--bundle", type=Path, required=True)
+    bank_verify.add_argument("--bank", type=Path, required=True)
+    bank_verify.add_argument("--mapping", type=Path, required=True)
+    bank_verify.add_argument("--max-input-bytes", type=_positive_limit, default=DEFAULT_MAX_INPUT_BYTES)
     verify = commands.add_parser("verify", help="Check a completed report bundle's recorded hashes")
     verify.add_argument("--bundle", type=Path, required=True)
     for source in ("sales", "processor", "bank"):
@@ -176,6 +177,12 @@ def main(argv: list[str] | None = None) -> int:
     compare.add_argument("--current", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
+        if args.command == "verify-bank-map":
+            audit = verify_bank_map(args.bundle, _capture(args.bank, args.max_input_bytes),
+                                    _capture(args.mapping, args.max_input_bytes))
+            print(f"SettleTrace: {len(audit['rows'])} explicit bank mapping(s) replayed; source and output bytes match. "
+                  "Payout attribution remains operator-supplied.")
+            return 0
         if args.command == "map-bank":
             _map_bank(args)
             print(f"SettleTrace: explicitly mapped bank records and source-row audit written to {args.output}")

@@ -60,3 +60,25 @@ class BankCliTests(unittest.TestCase):
             self.assertEqual(self.invoke()[0], 2)
         self.assertFalse((self.output / "audit.json").exists())
         self.assertTrue((self.output / "bank.csv").exists())
+
+    def verify(self, *extra):
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            return main(["verify-bank-map", "--bundle", str(self.output), "--bank", str(self.bank),
+                         "--mapping", str(self.mapping), *extra])
+
+    def test_operator_can_replay_the_complete_mapping_pack(self):
+        self.assertEqual(self.invoke()[0], 0)
+        self.assertEqual(self.verify(), 0)
+        self.assertEqual(self.verify("--max-input-bytes", "5"), 2)
+        self.mapping.write_bytes(self.mapping.read_bytes().replace(b"po1", b"po2"))
+        self.assertEqual(self.verify(), 2)
+
+    def test_verification_refuses_missing_marker_and_tampered_output(self):
+        self.assertEqual(self.invoke()[0], 0)
+        canonical = self.output / "bank.csv"
+        original = canonical.read_bytes()
+        canonical.write_bytes(original + b"tampered")
+        self.assertEqual(self.verify(), 2)
+        canonical.write_bytes(original)
+        (self.output / "audit.json").unlink()
+        self.assertEqual(self.verify(), 2)
