@@ -11,6 +11,7 @@ from .engine import reconcile
 from .ingest import parse_deposits, parse_entries, parse_sales
 from .models import InputError
 from .report import findings_csv, render_html
+from .stripe import parse_stripe
 
 
 def _fingerprint(path: Path, data: bytes) -> dict:
@@ -21,8 +22,9 @@ def _json(value: dict) -> str:
     return json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False, allow_nan=False) + "\n"
 
 
-def _bundle(result: dict, inputs: dict, output: Path) -> None:
-    manifest = {"schema_version": "1", "tool_version": __version__, "inputs": inputs}
+def _bundle(result: dict, inputs: dict, output: Path, configuration: dict | None = None) -> None:
+    manifest = {"schema_version": "1", "tool_version": __version__, "inputs": inputs,
+                "configuration": configuration or {"processor_format": "canonical", "decimal_separator": "."}}
     payloads = {
         "report.json": _json(result),
         "findings.csv": findings_csv(result),
@@ -51,6 +53,8 @@ def main(argv: list[str] | None = None) -> int:
     command.add_argument("--processor", type=Path, required=True)
     command.add_argument("--bank", type=Path, required=True)
     command.add_argument("--output", type=Path, required=True, help="New output directory; existing paths are never overwritten")
+    command.add_argument("--processor-format", choices=("canonical", "stripe-payout-itemized-7"), default="canonical")
+    command.add_argument("--decimal-separator", choices=(".", ","), default=".")
     args = parser.parse_args(argv)
     try:
         if args.output.exists():
@@ -60,10 +64,16 @@ def main(argv: list[str] | None = None) -> int:
         snapshots = {name: path.read_bytes() for name, path in paths.items()}
         fingerprints = {name: _fingerprint(path, snapshots[name]) for name, path in paths.items()}
         sales = parse_sales(snapshots["sales"], str(args.sales))
-        entries = parse_entries(snapshots["processor"], str(args.processor))
+        if args.processor_format == "canonical":
+            if args.decimal_separator != ".":
+                raise InputError("--decimal-separator applies only to the Stripe format")
+            entries = parse_entries(snapshots["processor"], str(args.processor))
+        else:
+            entries = parse_stripe(snapshots["processor"], str(args.processor), decimal_separator=args.decimal_separator)
         deposits = parse_deposits(snapshots["bank"], str(args.bank))
         result = reconcile(sales, entries, deposits)
-        _bundle(result, fingerprints, args.output)
+        _bundle(result, fingerprints, args.output, {"processor_format": args.processor_format,
+                                                  "decimal_separator": args.decimal_separator})
     except (InputError, OSError) as exc:
         print(f"SettleTrace input/output error: {exc}", file=sys.stderr)
         return 2

@@ -85,6 +85,10 @@ def render_html(result: dict, manifest: dict) -> str:
                "<th>Bank amount</th><th>Bank − net</th></tr></thead><tbody>" + "".join(payout_rows)
                + "</tbody></table></div>") if payout_rows else ""
     empty = "<p class='empty'>The supplied records agree under the documented matching rules.</p>"
+    configuration = manifest.get("configuration", {})
+    contract = ("<h2>Import contract</h2><p class='note'>Processor format: <code>"
+                + esc(configuration["processor_format"]) + "</code> · decimal separator: <code>"
+                + esc(configuration["decimal_separator"]) + "</code></p>") if configuration else ""
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
@@ -118,6 +122,6 @@ details{{font-size:13px}}code{{overflow-wrap:anywhere}}.sources{{font-size:12px;
 <h2>Observed totals by currency</h2><p class="note">Processor net = gross − fees. Currencies are kept separate; no exchange rates are inferred.</p>
 <div class="table-wrap"><table><thead><tr><th>Currency</th><th>Processor gross</th><th>Fees / credits</th><th>Processor net</th><th>Bank records</th></tr></thead><tbody>{''.join(totals)}</tbody></table></div>
 {payouts}<h2>Exceptions and evidence</h2>{''.join(cards) or empty}
-<h2>Input fingerprints</h2><ul class="sources">{sources}</ul>
-<footer>Observations apply only to the supplied files. An absent record can reflect the observation window or incomplete mapping; it is not proof of missing cash. Raw provider exports, FX, split captures, split deposits, and accounting advice are outside v0.1.</footer>
+{contract}<h2>Input fingerprints</h2><ul class="sources">{sources}</ul>
+<footer>Observations apply only to the supplied files under the selected CSV contract. An absent record can reflect the observation window or incomplete mapping; it is not proof of missing cash. FX, split captures, split deposits, and accounting advice are outside the supported scope.</footer>
 </main></body></html>"""
