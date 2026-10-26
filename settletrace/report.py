@@ -90,6 +90,19 @@ def render_html(result: dict, manifest: dict) -> str:
                 + esc(configuration["processor_format"]) + "</code> · decimal separator: <code>"
                 + esc(configuration["decimal_separator"]) + "</code> · exit policy: <code>"
                 + esc(configuration.get("fail_on", "any")) + "</code></p>") if configuration else ""
+    window = ""
+    if "observation_window" in result:
+        observation = result["observation_window"]
+        declaration = observation["declaration"]
+        rows = "".join("<tr>" + "".join(f"<td>{esc(value)}</td>" for value in
+                       (source, item["time_basis"], item["start_utc"], item["end_utc"])) + "</tr>"
+                       for source, item in sorted(declaration["sources"].items()))
+        window = ("<h2>Declared observation windows</h2><p>Account scope (operator label): <code>"
+                  + esc(declaration["account_scope"]) + "</code></p><p class='note'>"
+                  + esc(observation["note"]) + " Start is inclusive; end is exclusive. "
+                  "Processor estimated arrival and bank posting describe different events.</p>"
+                  "<div class='table-wrap'><table><thead><tr><th>Source</th><th>Time basis</th>"
+                  "<th>Start UTC</th><th>End UTC</th></tr></thead><tbody>" + rows + "</tbody></table></div>")
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
@@ -123,6 +136,6 @@ details{{font-size:13px}}code{{overflow-wrap:anywhere}}.sources{{font-size:12px;
 <h2>Observed totals by currency</h2><p class="note">Processor net = gross − fees. Currencies are kept separate; no exchange rates are inferred.</p>
 <div class="table-wrap"><table><thead><tr><th>Currency</th><th>Processor gross</th><th>Fees / credits</th><th>Processor net</th><th>Bank records</th></tr></thead><tbody>{''.join(totals)}</tbody></table></div>
 {payouts}<h2>Exceptions and evidence</h2>{''.join(cards) or empty}
-{contract}<h2>Input fingerprints</h2><ul class="sources">{sources}</ul>
+{contract}{window}<h2>Input fingerprints</h2><ul class="sources">{sources}</ul>
 <footer>Observations apply only to the supplied files under the selected CSV contract. An absent record can reflect the observation window or incomplete mapping; it is not proof of missing cash. FX, split captures, split deposits, and accounting advice are outside the supported scope.</footer>
 </main></body></html>"""

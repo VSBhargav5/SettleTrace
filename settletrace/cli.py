@@ -17,6 +17,7 @@ from .models import InputError
 from .report import findings_csv, render_html
 from .stripe import parse_stripe
 from .verify import verify_bundle, verify_sources
+from .window import assess_window, parse_window
 
 
 DEFAULT_MAX_INPUT_BYTES = 16 * 1024 * 1024
@@ -56,6 +57,7 @@ def _input_arguments(command: argparse.ArgumentParser) -> None:
     command.add_argument("--sales", type=Path, required=True)
     command.add_argument("--processor", type=Path, required=True)
     command.add_argument("--bank", type=Path, required=True)
+    command.add_argument("--window", type=Path, help="Optional hash-bound UTC observation declaration; no completeness claim")
     command.add_argument("--processor-format", choices=("canonical", "stripe-payout-itemized-7"), default="canonical")
     command.add_argument("--decimal-separator", choices=(".", ","), default=".")
     command.add_argument("--max-input-bytes", type=_positive_limit, default=DEFAULT_MAX_INPUT_BYTES,
@@ -168,6 +170,7 @@ def main(argv: list[str] | None = None) -> int:
     verify.add_argument("--bundle", type=Path, required=True)
     for source in ("sales", "processor", "bank"):
         verify.add_argument("--" + source, type=Path)
+    verify.add_argument("--window", type=Path)
     compare = commands.add_parser("compare", help="Compare observed findings in two verified report bundles")
     compare.add_argument("--baseline", type=Path, required=True)
     compare.add_argument("--current", type=Path, required=True)
@@ -180,17 +183,21 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "compare":
             baseline, current = verify_bundle(args.baseline), verify_bundle(args.current)
             comparison = compare_findings(baseline["report"], current["report"])
-            comparison["input_changes"] = [source for source in ("sales", "processor", "bank")
-                                            if baseline["manifest"]["inputs"][source]["sha256"]
-                                            != current["manifest"]["inputs"][source]["sha256"]]
+            before, after = baseline["manifest"]["inputs"], current["manifest"]["inputs"]
+            comparison["input_changes"] = [source for source in sorted(set(before) | set(after))
+                                            if before.get(source, {}).get("sha256") != after.get(source, {}).get("sha256")]
+            comparison["observation_window_changed"] = (baseline["report"].get("observation_window")
+                                                          != current["report"].get("observation_window"))
             print(_json(comparison), end="")
             return 0
         if args.command == "verify":
             checked = verify_bundle(args.bundle)
-            paths = {source: getattr(args, source) for source in ("sales", "processor", "bank") if getattr(args, source) is not None}
+            paths = {source: getattr(args, source) for source in ("sales", "processor", "bank", "window")
+                     if getattr(args, source) is not None}
             if paths:
                 verify_sources(checked["manifest"], paths)
-                print("SettleTrace: all three supplied source files match the recorded fingerprints.")
+                print("SettleTrace: all three supplied source files match the recorded fingerprints."
+                      + (" Observation declaration bytes also match." if "window" in paths else ""))
             print(f"SettleTrace: bundle hashes verified; {checked['report']['summary']['findings']} finding(s) remain in the report.")
             return 0
         if args.command == "normalize-stripe":
@@ -201,11 +208,18 @@ def main(argv: list[str] | None = None) -> int:
             raise InputError(f"Output path already exists: {args.output}; choose a new directory")
         sales, entries, deposits, fingerprints = _read_inputs(args)
         result = reconcile(sales, entries, deposits)
+        if args.window is not None:
+            data = _capture(args.window, args.max_input_bytes)
+            result["observation_window"] = assess_window(parse_window(data, str(args.window)), fingerprints)
+            fingerprints["window"] = _fingerprint(args.window, data)
         if args.command == "validate":
-            print(_json({"schema_version": "1", "valid": True,
-                         "records": {"sales": len(sales), "processor": len(entries), "bank": len(deposits)},
-                         "observed_findings": result["summary"]["findings"],
-                         "note": "Input contracts are valid; any reconciliation findings still need investigation."}), end="")
+            validation = {"schema_version": "1", "valid": True,
+                          "records": {"sales": len(sales), "processor": len(entries), "bank": len(deposits)},
+                          "observed_findings": result["summary"]["findings"],
+                          "note": "Input contracts are valid; any reconciliation findings still need investigation."}
+            if "observation_window" in result:
+                validation["observation_window"] = result["observation_window"]
+            print(_json(validation), end="")
             return 0
         _bundle(result, fingerprints, args.output, {"processor_format": args.processor_format,
                                                   "decimal_separator": args.decimal_separator, "fail_on": args.fail_on,

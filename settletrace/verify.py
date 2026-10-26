@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 
 from .models import InputError, SUPPORTED_CURRENCIES
+from .window import assess_window
 
 
 _OUTPUTS = frozenset({"report.json", "report.html", "findings.csv"})
@@ -112,7 +113,8 @@ def verify_bundle(path: Path | str) -> dict:
     _require(manifest.get("schema_version") == "1" and isinstance(manifest.get("tool_version"), str)
              and bool(manifest["tool_version"]), "Unsupported or malformed manifest version")
     inputs, outputs = manifest.get("inputs"), manifest.get("outputs")
-    _require(isinstance(inputs, dict) and set(inputs) == _SOURCES, "Manifest must describe sales, processor, and bank inputs")
+    _require(isinstance(inputs, dict) and (set(inputs) == _SOURCES or set(inputs) == _SOURCES | {"window"}),
+             "Manifest must describe sales, processor, and bank inputs, plus only an optional window")
     _require(isinstance(outputs, dict) and set(outputs) == _OUTPUTS, "Manifest must describe exactly the three report outputs")
     for fingerprint in inputs.values():
         _fingerprint(fingerprint, source=True)
@@ -124,6 +126,16 @@ def verify_bundle(path: Path | str) -> dict:
         payloads[name] = data
     report = _json(payloads["report.json"], "report.json")
     _report(report)
+    if "window" in inputs:
+        observation = report.get("observation_window")
+        _require(isinstance(observation, dict), "Missing observation-window assessment")
+        _require(observation.get("source_bytes_match") is True and observation.get("row_timestamps_checked") is False
+                 and type(observation.get("intervals_have_same_boundaries")) is bool,
+                 "Malformed observation-window assessment flags")
+        expected = assess_window(observation.get("declaration"), inputs)
+        _require(observation == expected, "Observation-window assessment disagrees with declaration or source bytes")
+    else:
+        _require("observation_window" not in report, "Observation declaration has no input fingerprint")
     return {"manifest": manifest, "report": report}
 
 
@@ -133,8 +145,9 @@ def verify_sources(manifest: dict, paths: dict[str, Path]) -> None:
     File names may differ after copying. No path from the manifest is opened.
     Hashing is streamed, so a large or changed source is not read into memory.
     """
-    _require(set(paths) == _SOURCES, "Supply all three source paths: --sales, --processor, --bank")
-    for source in sorted(_SOURCES):
+    _require(set(paths) == set(manifest["inputs"]),
+             "Supply all three source paths: --sales, --processor, --bank; include --window exactly when recorded")
+    for source in sorted(paths):
         expected = manifest["inputs"][source]
         path = Path(paths[source])
         _require(path.is_file(), f"Expected a source file for {source}")
