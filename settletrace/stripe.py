@@ -21,6 +21,8 @@ def parse_stripe(data: bytes, source: str, *, decimal_separator: str = ".") -> l
     ending physical line. Charges, refunds and debit disputes are supported;
     refund/dispute gross must be negative. Select dot or comma decimal amounts
     explicitly; the CSV column delimiter is always a comma.
+    Supplied FX/account guard columns are checked; their absence does not prove
+    that a report contains no currency conversion or account-scope ambiguity.
     """
     if not isinstance(data, bytes):
         raise TypeError("data must be an immutable bytes snapshot")
@@ -64,6 +66,17 @@ def parse_stripe(data: bytes, source: str, *, decimal_separator: str = ".") -> l
                 if re.fullmatch(r"[A-Za-z]{3}", raw_currency) is None:
                     raise invalid("currency must be a supported three-letter ASCII code", line)
                 currency = raw_currency.upper()
+                for field in ("customer_facing_currency", "connected_account_id"):
+                    if field in row and row[field] != row[field].strip():
+                        raise invalid(f"{field} has surrounding whitespace", line)
+                customer_currency = row.get("customer_facing_currency", "")
+                if customer_currency:
+                    if re.fullmatch(r"[A-Za-z]{3}", customer_currency) is None:
+                        raise invalid("customer_facing_currency must be a three-letter ASCII code", line)
+                    if customer_currency.upper() != currency:
+                        raise invalid("FX is unsupported: customer_facing_currency differs from settlement currency", line)
+                if row.get("connected_account_id", ""):
+                    raise invalid("Connect account scope is unsupported: connected_account_id is nonblank", line)
                 try:
                     amounts = {field: to_minor(row[field], currency, decimal_separator=decimal_separator)
                                for field in ("gross", "fee", "net")}

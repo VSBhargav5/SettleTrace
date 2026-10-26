@@ -149,6 +149,29 @@ class StripeTests(unittest.TestCase):
                 text += f"txn_2,,po_1,{kind},usd,-1.00,0.00,-1.00,re_or_dp_1,pi_1\n"
                 self.assert_invalid(text, "charge_id must be nonblank")
 
+    def test_optional_fx_and_account_guards_accept_matching_currency_or_blanks(self):
+        for customer_currency in ("USD", "usd", "UsD", ""):
+            with self.subTest(customer_currency=customer_currency):
+                text = HEADER.rstrip() + ",customer_facing_currency,connected_account_id\n"
+                text += CHARGE.rstrip() + f",{customer_currency},\n"
+                self.assertEqual(self.parse(text)[0].currency, "USD")
+
+    def test_known_customer_facing_currency_difference_rejects_fx_with_line(self):
+        text = HEADER.rstrip() + ",customer_facing_currency\n" + CHARGE.rstrip() + ",EUR\n"
+        self.assert_invalid(text, "FX is unsupported")
+
+    def test_customer_facing_currency_requires_ascii_code_without_padding(self):
+        for currency in ("US", "USDD", "123", "uſd", " usd", "usd ", " "):
+            with self.subTest(currency=currency):
+                text = HEADER.rstrip() + ",customer_facing_currency\n" + CHARGE.rstrip() + f",{currency}\n"
+                self.assert_invalid(text, "whitespace" if currency != currency.strip() else "ASCII code")
+
+    def test_connected_account_ids_reject_unsupported_scope_and_padding(self):
+        for account in ("acct_123", " acct_123", "acct_123 ", " "):
+            with self.subTest(account=account):
+                text = HEADER.rstrip() + ",connected_account_id\n" + CHARGE.rstrip() + f",{account}\n"
+                self.assert_invalid(text, "whitespace" if account != account.strip() else "Connect account scope is unsupported")
+
 
 if __name__ == "__main__":
     unittest.main()
