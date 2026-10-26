@@ -18,7 +18,8 @@ def parse_stripe(data: bytes, source: str, *, decimal_separator: str = ".") -> l
     """Parse immutable report bytes; extra columns and blank lines are allowed.
 
     References are explicit and never normalized. Evidence uses each record's
-    ending physical line. Only charge activity and dot decimals are supported.
+    ending physical line. Charges, refunds and debit disputes are supported;
+    refund/dispute gross must be negative. Decimal amounts use a dot.
     """
     if not isinstance(data, bytes):
         raise TypeError("data must be an immutable bytes snapshot")
@@ -56,7 +57,7 @@ def parse_stripe(data: bytes, source: str, *, decimal_separator: str = ".") -> l
                 transaction_id = row["balance_transaction_id"]
                 if transaction_id in seen:
                     raise invalid(f"duplicate balance_transaction_id: {transaction_id}", line)
-                if row["reporting_category"] != "charge":
+                if row["reporting_category"] not in {"charge", "refund", "dispute"}:
                     raise invalid(f"unsupported reporting_category: {row['reporting_category']!r}", line)
                 raw_currency = row["currency"]
                 if re.fullmatch(r"[A-Za-z]{3}", raw_currency) is None:
@@ -68,7 +69,7 @@ def parse_stripe(data: bytes, source: str, *, decimal_separator: str = ".") -> l
                         transaction_id=transaction_id,
                         payment_ref=row["charge_id"],
                         payout_id=row["automatic_payout_id"],
-                        kind="charge",
+                        kind=row["reporting_category"],
                         currency=currency,
                         gross_minor=amounts["gross"],
                         fee_minor=amounts["fee"],

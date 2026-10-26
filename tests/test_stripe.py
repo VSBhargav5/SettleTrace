@@ -2,7 +2,8 @@
 
 import unittest
 
-from settletrace.models import InputError
+from settletrace.engine import reconcile
+from settletrace.models import Deposit, InputError, Sale
 from settletrace.stripe import parse_stripe
 
 
@@ -43,7 +44,7 @@ class StripeTests(unittest.TestCase):
         self.assert_invalid(HEADER + CHARGE + CHARGE, "duplicate balance_transaction_id", line=3)
 
     def test_every_unsupported_category_aborts_entire_import(self):
-        for category in ("refund", "dispute", "fee", "adjustment", "unknown", ""):
+        for category in ("fee", "adjustment", "dispute_reversal", "refund_failure", "partial_capture_reversal", "unknown", ""):
             with self.subTest(category=category):
                 self.assert_invalid(HEADER + CHARGE + CHARGE.replace("txn_1", "txn_2").replace("charge,", category + ","),
                                     "unsupported reporting_category", line=3)
@@ -76,6 +77,53 @@ class StripeTests(unittest.TestCase):
     def test_decimal_separator_must_be_explicitly_supported(self):
         with self.assertRaises(InputError):
             parse_stripe((HEADER + CHARGE).encode("utf-8"), "stripe.csv", decimal_separator=",")
+
+    def test_refund_and_debit_dispute_preserve_signed_fees_and_original_charge(self):
+        rows = (
+            ("txn_refund,ch_original,po_1,refund,usd,-5.00,-0.15,-4.85\n", "refund", -500, -15, -485),
+            ("txn_dispute,ch_original,po_1,dispute,usd,-2.00,0.15,-2.15\n", "dispute", -200, 15, -215),
+        )
+        for text, kind, gross, fee, net in rows:
+            with self.subTest(kind=kind):
+                entry = self.parse(HEADER + text)[0]
+                self.assertEqual((entry.kind, entry.payment_ref), (kind, "ch_original"))
+                self.assertEqual((entry.gross_minor, entry.fee_minor, entry.net_minor), (gross, fee, net))
+
+    def test_charge_refund_and_dispute_share_charge_identity_without_duplicate_activity(self):
+        entries = self.parse(
+            HEADER + CHARGE
+            + "txn_refund,ch_1,po_1,refund,usd,-5.00,-0.15,-4.85\n"
+            + "txn_dispute,ch_1,po_1,dispute,usd,-2.00,0.15,-2.15\n"
+        )
+        report = reconcile([Sale("sale_1", "ch_1", "USD", 1999)], entries,
+                           [Deposit("bank_1", "po_1", "USD", 1240)])
+        self.assertEqual(report["findings"], [])
+        self.assertEqual(report["summary"]["matched_sales"], 1)
+        self.assertEqual(report["summary"]["matched_payouts"], 1)
+
+    def test_historical_refund_or_dispute_requires_no_invented_original_charge(self):
+        for kind in ("refund", "dispute"):
+            with self.subTest(kind=kind):
+                entries = self.parse(HEADER + f"txn_historical,ch_prior,po_1,{kind},usd,-100.00,0.00,-100.00\n")
+                report = reconcile([], entries, [Deposit("bank_1", "po_1", "USD", -10000)])
+                self.assertEqual([finding["code"] for finding in report["findings"]], ["ORIGINAL_CHARGE_NOT_OBSERVED"])
+                self.assertEqual(report["findings"][0]["reference"], "ch_prior")
+                self.assertEqual(report["summary"]["matched_payouts"], 1)
+
+    def test_refund_and_dispute_require_negative_gross_and_exact_net(self):
+        for kind in ("refund", "dispute"):
+            for gross, net, message in (("1.00", "1.00", "gross_minor must be negative"),
+                                        ("0.00", "0.00", "gross_minor must be negative"),
+                                        ("-1.00", "-0.99", "net_minor must equal")):
+                with self.subTest(kind=kind, gross=gross, net=net):
+                    self.assert_invalid(HEADER + f"txn_2,ch_1,po_1,{kind},usd,{gross},0.00,{net}\n", message)
+
+    def test_refund_and_dispute_never_fall_back_to_source_or_payment_intent(self):
+        for kind in ("refund", "dispute"):
+            with self.subTest(kind=kind):
+                text = HEADER.rstrip() + ",source_id,payment_intent_id\n"
+                text += f"txn_2,,po_1,{kind},usd,-1.00,0.00,-1.00,re_or_dp_1,pi_1\n"
+                self.assert_invalid(text, "charge_id must be nonblank")
 
 
 if __name__ == "__main__":
