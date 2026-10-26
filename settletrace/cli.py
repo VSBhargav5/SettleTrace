@@ -14,7 +14,7 @@ from .ingest import ENTRY_FIELDS, parse_deposits, parse_entries, parse_sales
 from .models import InputError
 from .report import findings_csv, render_html
 from .stripe import parse_stripe
-from .verify import verify_bundle
+from .verify import verify_bundle, verify_sources
 
 
 DEFAULT_MAX_INPUT_BYTES = 16 * 1024 * 1024
@@ -135,10 +135,16 @@ def main(argv: list[str] | None = None) -> int:
     normalize.add_argument("--max-input-bytes", type=_positive_limit, default=DEFAULT_MAX_INPUT_BYTES)
     verify = commands.add_parser("verify", help="Check a completed report bundle's recorded hashes")
     verify.add_argument("--bundle", type=Path, required=True)
+    for source in ("sales", "processor", "bank"):
+        verify.add_argument("--" + source, type=Path)
     args = parser.parse_args(argv)
     try:
         if args.command == "verify":
             checked = verify_bundle(args.bundle)
+            paths = {source: getattr(args, source) for source in ("sales", "processor", "bank") if getattr(args, source) is not None}
+            if paths:
+                verify_sources(checked["manifest"], paths)
+                print("SettleTrace: all three supplied source files match the recorded fingerprints.")
             print(f"SettleTrace: bundle hashes verified; {checked['report']['summary']['findings']} finding(s) remain in the report.")
             return 0
         if args.command == "normalize-stripe":

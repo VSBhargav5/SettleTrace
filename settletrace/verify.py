@@ -121,3 +121,27 @@ def verify_bundle(path: Path | str) -> dict:
     report = _json(payloads["report.json"], "report.json")
     _report(report)
     return {"manifest": manifest, "report": report}
+
+
+def verify_sources(manifest: dict, paths: dict[str, Path]) -> None:
+    """Check explicitly supplied source paths against a verified manifest.
+
+    File names may differ after copying. No path from the manifest is opened.
+    Hashing is streamed, so a large or changed source is not read into memory.
+    """
+    _require(set(paths) == _SOURCES, "Supply all three source paths: --sales, --processor, --bank")
+    for source in sorted(_SOURCES):
+        expected = manifest["inputs"][source]
+        path = Path(paths[source])
+        _require(path.is_file(), f"Expected a source file for {source}")
+        digest, size = hashlib.sha256(), 0
+        try:
+            with path.open("rb") as stream:
+                while chunk := stream.read(65536):
+                    size += len(chunk)
+                    _require(size <= expected["size_bytes"], f"Input size mismatch: {source}")
+                    digest.update(chunk)
+        except OSError as exc:
+            raise InputError(f"Cannot read {source}: {exc}") from exc
+        _require(size == expected["size_bytes"], f"Input size mismatch: {source}")
+        _require(digest.hexdigest() == expected["sha256"], f"Input hash mismatch: {source}")

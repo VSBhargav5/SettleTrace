@@ -42,3 +42,34 @@ class VerifyCliTests(unittest.TestCase):
         (self.bundle / "manifest.json").unlink()
         code, _, _ = self.invoke()
         self.assertEqual(code, 2)
+
+    def source_args(self, sales=None):
+        return ["--sales", str(sales or self.inputs / "sales.csv"),
+                "--processor", str(self.inputs / "processor.csv"), "--bank", str(self.inputs / "bank.csv")]
+
+    def test_supplied_sources_can_be_copied_and_renamed_without_changing_content(self):
+        renamed = self.root / "renamed.csv"
+        renamed.write_bytes((self.inputs / "sales.csv").read_bytes())
+        code, stdout, _ = self.invoke(*self.source_args(renamed))
+        self.assertEqual(code, 0)
+        self.assertIn("all three supplied source files", stdout)
+
+    def test_same_sized_changed_source_does_not_pass_hash_verification(self):
+        changed = self.root / "changed.csv"
+        changed.write_bytes((self.inputs / "sales.csv").read_bytes().replace(b"10000", b"10001"))
+        code, _, stderr = self.invoke(*self.source_args(changed))
+        self.assertEqual(code, 2)
+        self.assertIn("Input hash mismatch: sales", stderr)
+
+    def test_partial_source_selection_does_not_claim_all_inputs_verified(self):
+        code, stdout, stderr = self.invoke("--sales", str(self.inputs / "sales.csv"))
+        self.assertEqual(code, 2)
+        self.assertEqual(stdout, "")
+        self.assertIn("all three source paths", stderr)
+
+    def test_truncated_source_does_not_pass_size_verification(self):
+        changed = self.root / "short.csv"
+        changed.write_bytes(b"short")
+        code, _, stderr = self.invoke(*self.source_args(changed))
+        self.assertEqual(code, 2)
+        self.assertIn("Input size mismatch: sales", stderr)
