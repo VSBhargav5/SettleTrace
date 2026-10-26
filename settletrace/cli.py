@@ -9,6 +9,8 @@ from pathlib import Path
 import sys
 
 from . import __version__
+from .bank import map_bank
+from .bankpack import render_bank, verify_bank_map
 from .compare import compare_findings
 from .engine import reconcile
 from .ingest import ENTRY_FIELDS, parse_deposits, parse_entries, parse_sales
@@ -16,6 +18,7 @@ from .models import InputError
 from .report import findings_csv, render_html
 from .stripe import parse_stripe
 from .verify import verify_bundle, verify_sources
+from .window import assess_window, parse_window
 
 
 DEFAULT_MAX_INPUT_BYTES = 16 * 1024 * 1024
@@ -55,6 +58,7 @@ def _input_arguments(command: argparse.ArgumentParser) -> None:
     command.add_argument("--sales", type=Path, required=True)
     command.add_argument("--processor", type=Path, required=True)
     command.add_argument("--bank", type=Path, required=True)
+    command.add_argument("--window", type=Path, help="Optional hash-bound UTC observation declaration; no completeness claim")
     command.add_argument("--processor-format", choices=("canonical", "stripe-payout-itemized-7"), default="canonical")
     command.add_argument("--decimal-separator", choices=(".", ","), default=".")
     command.add_argument("--max-input-bytes", type=_positive_limit, default=DEFAULT_MAX_INPUT_BYTES,
@@ -123,6 +127,20 @@ def _normalize(args: argparse.Namespace) -> None:
     _write_pack(args.output, {"processor.csv": canonical}, audit, "audit.json")
 
 
+def _map_bank(args: argparse.Namespace) -> None:
+    if args.output.exists():
+        raise InputError(f"Output path already exists: {args.output}; choose a new directory")
+    bank = _capture(args.bank, args.max_input_bytes)
+    mapping = _capture(args.mapping, args.max_input_bytes)
+    deposits, rows = map_bank(bank, mapping, str(args.bank), str(args.mapping))
+    canonical = render_bank(deposits)
+    normalized = parse_deposits(canonical.encode("utf-8"), "bank.csv")
+    audit = {"schema_version": "1", "tool_version": __version__,
+             "inputs": {"bank": _fingerprint(args.bank, bank), "mapping": _fingerprint(args.mapping, mapping)},
+             "rows": [{**row, "canonical_row": record.row} for row, record in zip(rows, normalized)]}
+    _write_pack(args.output, {"bank.csv": canonical}, audit, "audit.json")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="settletrace", description="Trace exceptions in supplied payment records, offline.")
     parser.add_argument("--version", action="version", version=__version__)
@@ -139,29 +157,55 @@ def main(argv: list[str] | None = None) -> int:
     normalize.add_argument("--output", type=Path, required=True)
     normalize.add_argument("--decimal-separator", choices=(".", ","), default=".")
     normalize.add_argument("--max-input-bytes", type=_positive_limit, default=DEFAULT_MAX_INPUT_BYTES)
+    bank_map = commands.add_parser("map-bank", help="Apply an explicit one-to-one payout mapping to a prepared bank extract")
+    bank_map.add_argument("--bank", type=Path, required=True)
+    bank_map.add_argument("--mapping", type=Path, required=True)
+    bank_map.add_argument("--output", type=Path, required=True)
+    bank_map.add_argument("--max-input-bytes", type=_positive_limit, default=DEFAULT_MAX_INPUT_BYTES)
+    bank_verify = commands.add_parser("verify-bank-map", help="Replay a completed bank mapping against both original source files")
+    bank_verify.add_argument("--bundle", type=Path, required=True)
+    bank_verify.add_argument("--bank", type=Path, required=True)
+    bank_verify.add_argument("--mapping", type=Path, required=True)
+    bank_verify.add_argument("--max-input-bytes", type=_positive_limit, default=DEFAULT_MAX_INPUT_BYTES)
     verify = commands.add_parser("verify", help="Check a completed report bundle's recorded hashes")
     verify.add_argument("--bundle", type=Path, required=True)
     for source in ("sales", "processor", "bank"):
         verify.add_argument("--" + source, type=Path)
+    verify.add_argument("--window", type=Path)
     compare = commands.add_parser("compare", help="Compare observed findings in two verified report bundles")
     compare.add_argument("--baseline", type=Path, required=True)
     compare.add_argument("--current", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
+        if args.command == "verify-bank-map":
+            audit = verify_bank_map(args.bundle, _capture(args.bank, args.max_input_bytes),
+                                    _capture(args.mapping, args.max_input_bytes))
+            print(f"SettleTrace: {len(audit['rows'])} explicit bank mapping(s) replayed; source and output bytes match. "
+                  "Payout attribution remains operator-supplied.")
+            return 0
+        if args.command == "map-bank":
+            _map_bank(args)
+            print(f"SettleTrace: explicitly mapped bank records and source-row audit written to {args.output}")
+            return 0
         if args.command == "compare":
             baseline, current = verify_bundle(args.baseline), verify_bundle(args.current)
             comparison = compare_findings(baseline["report"], current["report"])
-            comparison["input_changes"] = [source for source in ("sales", "processor", "bank")
-                                            if baseline["manifest"]["inputs"][source]["sha256"]
-                                            != current["manifest"]["inputs"][source]["sha256"]]
+            before, after = baseline["manifest"]["inputs"], current["manifest"]["inputs"]
+            comparison["input_changes"] = [source for source in sorted(set(before) | set(after))
+                                            if before.get(source, {}).get("sha256") != after.get(source, {}).get("sha256")]
+            comparison["observation_window_changed"] = (baseline["report"].get("observation_window")
+                                                          != current["report"].get("observation_window"))
             print(_json(comparison), end="")
             return 0
         if args.command == "verify":
             checked = verify_bundle(args.bundle)
-            paths = {source: getattr(args, source) for source in ("sales", "processor", "bank") if getattr(args, source) is not None}
+            paths = {source: getattr(args, source) for source in ("sales", "processor", "bank", "window")
+                     if getattr(args, source) is not None}
             if paths:
-                verify_sources(checked["manifest"], paths)
-                print("SettleTrace: all three supplied source files match the recorded fingerprints.")
+                verify_sources(checked["manifest"], paths,
+                               window_declaration=checked["report"].get("observation_window", {}).get("declaration"))
+                print("SettleTrace: all three supplied source files match the recorded fingerprints."
+                      + (" Observation declaration bytes also match." if "window" in paths else ""))
             print(f"SettleTrace: bundle hashes verified; {checked['report']['summary']['findings']} finding(s) remain in the report.")
             return 0
         if args.command == "normalize-stripe":
@@ -172,11 +216,18 @@ def main(argv: list[str] | None = None) -> int:
             raise InputError(f"Output path already exists: {args.output}; choose a new directory")
         sales, entries, deposits, fingerprints = _read_inputs(args)
         result = reconcile(sales, entries, deposits)
+        if args.window is not None:
+            data = _capture(args.window, args.max_input_bytes)
+            result["observation_window"] = assess_window(parse_window(data, str(args.window)), fingerprints)
+            fingerprints["window"] = _fingerprint(args.window, data)
         if args.command == "validate":
-            print(_json({"schema_version": "1", "valid": True,
-                         "records": {"sales": len(sales), "processor": len(entries), "bank": len(deposits)},
-                         "observed_findings": result["summary"]["findings"],
-                         "note": "Input contracts are valid; any reconciliation findings still need investigation."}), end="")
+            validation = {"schema_version": "1", "valid": True,
+                          "records": {"sales": len(sales), "processor": len(entries), "bank": len(deposits)},
+                          "observed_findings": result["summary"]["findings"],
+                          "note": "Input contracts are valid; any reconciliation findings still need investigation."}
+            if "observation_window" in result:
+                validation["observation_window"] = result["observation_window"]
+            print(_json(validation), end="")
             return 0
         _bundle(result, fingerprints, args.output, {"processor_format": args.processor_format,
                                                   "decimal_separator": args.decimal_separator, "fail_on": args.fail_on,

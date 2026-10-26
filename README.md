@@ -13,6 +13,10 @@ customer demand and willingness to pay are still hypotheses.
 audited canonical export, input validation, bundle/source verification, and
 comparison of observed exceptions. See the [exact import contract](docs/stripe-import.md).
 
+**v0.3** adds an auditable explicit bank-mapping workflow and hash-bound UTC
+observation declarations. Dates, account identity, and completeness remain
+unverified; see the [observation contract](docs/observation-contract.md).
+
 ## Run the synthetic demonstration
 
 ```sh
@@ -77,6 +81,35 @@ changed, unchanged, and **no longer observed** findings as JSON. It discloses
 changed input hashes; absence does not prove that a problem was resolved.
 
 ## Input contract, version 1
+
+### Explicit mapping and declared windows (v0.3)
+
+`map-bank` joins a prepared minor-unit bank extract to a separate, explicit
+one-to-one payout mapping. It rejects unmapped records, extra mappings, duplicate
+references, and split/aggregated deposits. The output includes canonical
+`bank.csv` plus both input fingerprints and physical source rows. `verify-bank-map`
+replays that exact join against both original files; it does not establish that
+the operator chose the correct payout.
+
+```sh
+python -m settletrace map-bank --bank examples/windowed/bank-extract.csv --mapping examples/windowed/mapping.csv --output output/mapped-bank
+python -m settletrace verify-bank-map --bundle output/mapped-bank --bank examples/windowed/bank-extract.csv --mapping examples/windowed/mapping.csv
+python -m settletrace reconcile --sales examples/windowed/sales.csv --processor examples/windowed/processor.csv --processor-format stripe-payout-itemized-7 --bank output/mapped-bank/bank.csv --window examples/windowed/window.json --output output/windowed
+python -m settletrace verify --bundle output/windowed --sales examples/windowed/sales.csv --processor examples/windowed/processor.csv --bank output/mapped-bank/bank.csv --window examples/windowed/window.json
+```
+
+Use fresh output directories on reruns. The optional `--window` declaration binds
+UTC intervals and an operator account label to the exact three source snapshots.
+Sales capture, estimated automatic payout arrival, and bank posting are different
+events; the sample deliberately gives the bank a later end date. Start is
+inclusive, end exclusive. Row timestamps and account identity are **not checked**,
+no date filtering occurs, and completeness remains **not established**. This is
+provenance for investigation, not proof that all transactions were exported.
+`validate` accepts the same declaration; `compare` discloses added/removed/changed
+window evidence. Source verification requires `--window` when it was recorded.
+
+See [the observation and mapping contract](docs/observation-contract.md) and
+[the focused learning exercise](docs/observation-first-principles.md).
 
 Use UTF-8 CSVs with these exact columns (column order can vary). The first record
 is the header. UTF-8 BOM is accepted. Blank separator lines are ignored.
@@ -160,8 +193,8 @@ supplied business records when sharing them.
 ## Boundaries and next steps
 
 An absent record means **not observed in the supplied input**, not unpaid cash,
-fraud, or a complete accounting conclusion. Inputs have no dates: choose a
-consistent observation window and include the relevant payout entries. A refund
+fraud, or a complete accounting conclusion. Records have no event timestamps:
+declare the selection context and include the relevant payout entries. A refund
 can relate to a charge in an earlier period. There is no automatic date matching,
 FX, fee estimation, tax handling, refund entitlement check, processor connection,
 or bank connection. The CLI loads the datasets into memory; large-file streaming
@@ -173,8 +206,9 @@ The hypothesis here is a smaller offline investigation pack for a **custom
 merchant ledger plus processor and bank evidence**. The first release establishes
 correctness on synthetic fixtures; it does not prove differentiation or adoption.
 
-Next: prove an observation-window and bank-mapping workflow, then compare with a
-real operator's process if a suitable user is reachable. AI could later propose
+Next: validate the import and mapping workflow against a permitted real-account
+export and an operator's process, if suitable evidence becomes available. The
+declared windows do not yet prove row membership or completeness. AI could later propose
 column mappings or explain existing evidence; monetary reconciliation remains
 deterministic. Customer value and willingness to pay remain unvalidated.
 

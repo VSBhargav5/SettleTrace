@@ -42,6 +42,14 @@ jobs:
         run: settletrace compare --baseline output/stripe --current output/stripe
       - name: Validate explicitly selected comma decimals
         run: settletrace validate --sales examples/stripe-comma/sales.csv --processor examples/stripe-comma/processor.csv --bank examples/stripe-comma/bank.csv --processor-format stripe-payout-itemized-7 --decimal-separator ,
+      - name: Apply and replay explicit bank mapping
+        run: |
+          settletrace map-bank --bank examples/windowed/bank-extract.csv --mapping examples/windowed/mapping.csv --output output/mapped-bank
+          settletrace verify-bank-map --bundle output/mapped-bank --bank examples/windowed/bank-extract.csv --mapping examples/windowed/mapping.csv
+      - name: Reconcile and verify hash-bound observation declaration
+        run: |
+          settletrace reconcile --sales examples/windowed/sales.csv --processor examples/windowed/processor.csv --processor-format stripe-payout-itemized-7 --bank output/mapped-bank/bank.csv --window examples/windowed/window.json --output output/windowed
+          settletrace verify --bundle output/windowed --sales examples/windowed/sales.csv --processor examples/windowed/processor.csv --bank output/mapped-bank/bank.csv --window examples/windowed/window.json
       - name: Upload synthetic report for inspection
         uses: actions/upload-artifact@v4
         with:
@@ -50,3 +58,5 @@ jobs:
             output/clean/
             output/stripe/
             output/normalized/
+            output/mapped-bank/
+            output/windowed/

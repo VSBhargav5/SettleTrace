@@ -1,0 +1,2 @@
+# Hash-bound synthetic fixtures must retain the same bytes on Windows and Linux.
+examples/windowed/* text eol=lf
